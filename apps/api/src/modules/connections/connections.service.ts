@@ -57,7 +57,7 @@ export class ConnectionsService {
     try {
       const { account } = sourceProvider
         ? await sourceProvider.testConnection(credentialsStore.get(id))
-        : await destinationProvider!.testConnection();
+        : await destinationProvider!.testConnection(credentialsStore.get(id));
       return this.repository.update(id, { status: "VALID", account }) ?? connection;
     } catch (err) {
       this.repository.update(id, { status: "INVALID" });
@@ -67,19 +67,27 @@ export class ConnectionsService {
 
   async browse(id: string, path: string): Promise<{ path: string; nodes: RemoteNode[] }> {
     const connection = this.getById(id);
-    const provider = providerRegistry.get(connection.provider);
+    const sourceProvider = providerRegistry.get(connection.provider);
+    const destProvider = destinationProviderRegistry.get(connection.provider);
+    const folderId = path === "/" || path === "" ? undefined : path;
 
-    if (!provider) {
-      return { path, nodes: buildDummyTree(path) };
+    if (sourceProvider) {
+      // Full browsing: folders + files, e.g. MEGA picking a source folder.
+      const credentials = credentialsStore.get(id);
+      const [folders, files] = await Promise.all([
+        sourceProvider.listFolders(credentials, folderId),
+        sourceProvider.listFiles(credentials, folderId),
+      ]);
+      return { path, nodes: [...folders, ...files] };
     }
 
-    const folderId = path === "/" || path === "" ? undefined : path;
-    const credentials = credentialsStore.get(id);
-    const [folders, files] = await Promise.all([
-      provider.listFolders(credentials, folderId),
-      provider.listFiles(credentials, folderId),
-    ]);
-    return { path, nodes: [...folders, ...files] };
+    if (destProvider) {
+      // Destination-only providers (Google Drive) only need folder listing
+      // — the user is picking an upload target, not browsing files there.
+      return { path, nodes: await destProvider.listFolders(credentialsStore.get(id), folderId) };
+    }
+
+    return { path, nodes: buildDummyTree(path) };
   }
 
   async downloadFile(id: string, fileId: string): Promise<RemoteFileHandle> {
@@ -105,10 +113,10 @@ export class ConnectionsService {
       );
     }
 
-    return provider.createFolder(parentId, name);
+    return provider.createFolder(credentialsStore.get(id), parentId, name);
   }
 
-  async uploadFile(id: string, params: UploadFileParams): Promise<UploadOutcome> {
+  async uploadFile(id: string, params: Omit<UploadFileParams, "credentials">): Promise<UploadOutcome> {
     const connection = this.getById(id);
     const provider = destinationProviderRegistry.get(connection.provider);
 
@@ -118,7 +126,7 @@ export class ConnectionsService {
       );
     }
 
-    return provider.uploadFile(params);
+    return provider.uploadFile({ ...params, credentials: credentialsStore.get(id) });
   }
 }
 

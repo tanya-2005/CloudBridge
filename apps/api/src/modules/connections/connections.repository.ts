@@ -21,13 +21,17 @@ export class ConnectionsRepository {
     return this.store.get(id);
   }
 
-  create(input: Pick<CloudConnection, "provider" | "label">): CloudConnection {
+  create(
+    input: Pick<CloudConnection, "provider" | "label"> &
+      Partial<Pick<CloudConnection, "status" | "account">>
+  ): CloudConnection {
     const now = new Date().toISOString();
     const connection: CloudConnection = {
       id: createId("conn"),
       provider: input.provider,
       label: input.label,
-      status: "UNVERIFIED",
+      status: input.status ?? "UNVERIFIED",
+      account: input.account,
       createdAt: now,
       updatedAt: now,
     };

@@ -8,15 +8,22 @@ export type ProviderId =
 
 export type ProviderRole = "source" | "destination";
 
+/**
+ * How a "Connect" click for this provider actually authenticates:
+ * "credentials" — an inline email/password form (MEGA); "oauth" — a real
+ * Google-style consent popup; "none" — a single click, nothing to enter.
+ */
+export type AuthMethod = "credentials" | "oauth" | "none";
+
 export interface CloudProviderMeta {
   id: ProviderId;
   name: string;
   shortName: string;
-  description: string;
   /** tailwind classes for the brand chip */
   accentClass: string;
   roles: ProviderRole[];
   available: boolean;
+  authMethod: AuthMethod;
 }
 
 export type ConnectionStatus =
@@ -26,8 +33,11 @@ export type ConnectionStatus =
   | "error";
 
 export interface ConnectionState {
+  /** Real backend CloudConnection id, once created. */
+  id: string | null;
   status: ConnectionStatus;
   account?: string;
+  error?: string;
 }
 
 export type DuplicateStrategy = "skip" | "replace" | "rename" | "ask";
@@ -38,12 +48,18 @@ export interface DuplicateOption {
   description: string;
 }
 
-export interface MockNode {
+/** A folder selected via the real folder browser: real id + a readable breadcrumb. */
+export interface SelectedFolder {
+  id: string;
+  label: string;
+}
+
+/** A node returned by the backend's real folder browser (MEGA/Google Drive). */
+export interface RemoteNode {
   id: string;
   name: string;
   type: "folder" | "file";
   sizeBytes?: number;
-  children?: MockNode[];
 }
 
 export type FileStatus =
@@ -61,6 +77,7 @@ export interface FileTransferItem {
   sizeBytes: number;
   transferredBytes: number;
   status: FileStatus;
+  errorMessage?: string;
 }
 
 export type LogLevel = "info" | "success" | "warning" | "error";
@@ -72,17 +89,15 @@ export interface ActivityLogEntry {
   timestamp: string;
 }
 
-export type MigrationStatus = "idle" | "running" | "completed" | "failed";
-
-export interface MigrationSnapshot {
-  id: string;
-  source: ProviderId;
-  destination: ProviderId;
-  status: MigrationStatus;
-  duplicateStrategy: DuplicateStrategy;
-  startedAt: string;
-  completedAt?: string;
-}
+export type MigrationStatus =
+  | "idle"
+  | "pending"
+  | "planning"
+  | "running"
+  | "completed"
+  | "completed_with_errors"
+  | "failed"
+  | "cancelled";
 
 export interface DashboardStat {
   id: string;

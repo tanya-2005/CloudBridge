@@ -3,7 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { AppError, TransientProviderError } from "../../../common/errors/app-error.js";
 import { createProgressTransform } from "../../../common/streams/progress-transform.js";
 import type { DuplicateStrategy, JobStatus } from "../../../types/enums.js";
-import type { FileTransfer } from "../../../types/models.js";
+import type { FileTransfer, LogLevel } from "../../../types/models.js";
 import { connectionsRepository } from "../../connections/connections.repository.js";
 import { credentialsStore } from "../../connections/credentials.store.js";
 import { destinationProviderRegistry } from "../../providers/destination-provider-registry.js";
@@ -25,10 +25,18 @@ import { withRetry } from "./retry.js";
 
 const CONCURRENCY = 3;
 
+const TERMINAL_STATUSES = new Set<JobStatus>([
+  "COMPLETED",
+  "COMPLETED_WITH_ERRORS",
+  "FAILED",
+  "CANCELLED",
+]);
+
 interface JobProviders {
   sourceProvider: SourceProvider;
   sourceCredentials: unknown;
   destProvider: DestinationProvider;
+  destCredentials: unknown;
 }
 
 /**
@@ -51,7 +59,12 @@ export function resolveJobProviders(jobId: string): JobProviders | null {
   const destProvider = destinationProviderRegistry.get(destination.provider);
   if (!sourceProvider || !destProvider) return null;
 
-  return { sourceProvider, sourceCredentials: credentialsStore.get(source.id), destProvider };
+  return {
+    sourceProvider,
+    sourceCredentials: credentialsStore.get(source.id),
+    destProvider,
+    destCredentials: credentialsStore.get(destination.id),
+  };
 }
 
 class MigrationEngine {
@@ -65,6 +78,11 @@ class MigrationEngine {
   /** Marks a job so any in-flight or not-yet-started file transfers stop picking up new work. */
   cancelJob(jobId: string): void {
     this.cancelled.add(jobId);
+    this.log(jobId, "warning", "Migration cancelled.");
+  }
+
+  private log(jobId: string, level: LogLevel, message: string): void {
+    migrationsRepository.addLog(jobId, level, message);
   }
 
   /** Fire-and-forget: plans and runs the whole job. Called right after a migration is created. */
@@ -80,6 +98,7 @@ class MigrationEngine {
 
       migrationsRepository.update(jobId, { status: "RUNNING", completedAt: undefined });
       const failed = migrationsRepository.listFiles(jobId).filter((f) => f.status === "FAILED");
+      this.log(jobId, "info", `Retrying ${failed.length} failed file${failed.length === 1 ? "" : "s"}.`);
       await this.processBatch(jobId, failed, providers);
       this.finalizeJob(jobId);
     });
@@ -117,6 +136,7 @@ class MigrationEngine {
 
     const job = migrationsRepository.findById(jobId)!;
     migrationsRepository.update(jobId, { status: "PLANNING" });
+    this.log(jobId, "info", "Scanning the source folder…");
 
     let planned;
     try {
@@ -124,7 +144,9 @@ class MigrationEngine {
         job.sourceRootPath === "/" || job.sourceRootPath === "" ? undefined : job.sourceRootPath;
       planned = await planMigrationTree(providers, rootFolderId, job.destRootFolderId);
     } catch (err) {
+      const message = err instanceof AppError ? err.message : "Unexpected error while planning.";
       console.error(`Migration ${jobId} planning failed:`, err);
+      this.log(jobId, "error", `Planning failed: ${message}`);
       migrationsRepository.update(jobId, { status: "FAILED", completedAt: new Date().toISOString() });
       return;
     }
@@ -132,6 +154,7 @@ class MigrationEngine {
     const startedAt = new Date().toISOString();
 
     if (planned.length === 0) {
+      this.log(jobId, "info", "No files found in the selected folder — nothing to migrate.");
       migrationsRepository.update(jobId, {
         status: "COMPLETED",
         totalFiles: 0,
@@ -159,6 +182,7 @@ class MigrationEngine {
       transferredBytes: 0,
       startedAt,
     });
+    this.log(jobId, "info", `Found ${files.length} file${files.length === 1 ? "" : "s"} to migrate.`);
 
     await this.processBatch(jobId, files, providers);
     this.finalizeJob(jobId);
@@ -193,7 +217,7 @@ class MigrationEngine {
   ): Promise<void> {
     if (this.cancelled.has(jobId)) return;
 
-    const { sourceProvider, sourceCredentials, destProvider } = providers;
+    const { sourceProvider, sourceCredentials, destProvider, destCredentials } = providers;
     const strategy = file.duplicateAction ?? defaultStrategy;
     const tempPath = tempFilePath(tempDir, file.id, file.filename);
 
@@ -210,14 +234,16 @@ class MigrationEngine {
       );
 
       const outcome = await withRetry(
-        () => this.uploadFromTemp(jobId, file, destProvider, tempPath, strategy),
+        () => this.uploadFromTemp(jobId, file, destProvider, destCredentials, tempPath, strategy),
         (attempt) => migrationsRepository.updateFile(jobId, file.id, { attempts: attempt })
       );
 
       if (outcome.status === "skipped") {
         this.updateFileProgress(jobId, file.id, { status: "SKIPPED", duplicateAction: "SKIP" });
+        this.log(jobId, "info", `Skipped "${file.filename}" — already exists at the destination.`);
       } else if (outcome.status === "conflict") {
         this.updateFileProgress(jobId, file.id, { status: "CONFLICT" });
+        this.log(jobId, "warning", `Duplicate found for "${file.filename}" — waiting for your decision.`);
       } else {
         // outcome.file.name is the *actual* name Drive used, which can
         // differ from file.filename under RENAME — persist it so callers
@@ -228,10 +254,12 @@ class MigrationEngine {
           transferredBytes: file.sizeBytes,
           filename: outcome.file.name,
         });
+        this.log(jobId, "success", `Transferred "${outcome.file.name}".`);
       }
     } catch (err) {
       const appError =
         err instanceof AppError ? err : new TransientProviderError("Unexpected transfer failure.");
+      this.log(jobId, "error", `Failed to transfer "${file.filename}": ${appError.message}`);
       migrationsRepository.updateFile(jobId, file.id, {
         status: "FAILED",
         errorType: appError.code,
@@ -271,6 +299,7 @@ class MigrationEngine {
     jobId: string,
     file: FileTransfer,
     destProvider: DestinationProvider,
+    destCredentials: unknown,
     tempPath: string,
     duplicateStrategy: DuplicateStrategy
   ) {
@@ -280,6 +309,7 @@ class MigrationEngine {
       sizeBytes: file.sizeBytes,
       stream: createReadStream(tempPath),
       duplicateStrategy,
+      credentials: destCredentials,
       onProgress: ({ bytesUploaded }) => {
         this.updateFileProgress(jobId, file.id, {
           transferredBytes: scaledProgress(bytesUploaded, file.sizeBytes, "upload"),
@@ -301,7 +331,10 @@ class MigrationEngine {
 
   private finalizeJob(jobId: string): void {
     const job = migrationsRepository.findById(jobId);
-    if (!job || job.status === "CANCELLED") return; // Cancellation wins — never resurrect a cancelled job's status.
+    if (!job) return;
+    // Already finalized (or cancelled) — never re-run this, which would
+    // both re-log the summary and re-sweep the temp dir needlessly.
+    if (job.status === "CANCELLED" || TERMINAL_STATUSES.has(job.status)) return;
 
     const files = migrationsRepository.listFiles(jobId);
     if (files.length === 0) return;
@@ -311,15 +344,21 @@ class MigrationEngine {
     );
     if (stillPending) return; // Conflicts awaiting user input keep the job RUNNING — see ARCHITECTURE.md §9.
 
-    const anyDone = files.some((f) => f.status === "DONE");
-    const anyFailed = files.some((f) => f.status === "FAILED");
+    const done = files.filter((f) => f.status === "DONE").length;
+    const skipped = files.filter((f) => f.status === "SKIPPED").length;
+    const failed = files.filter((f) => f.status === "FAILED").length;
 
     let status: JobStatus;
-    if (anyFailed && anyDone) status = "COMPLETED_WITH_ERRORS";
-    else if (anyFailed) status = "FAILED";
+    if (failed > 0 && done + skipped > 0) status = "COMPLETED_WITH_ERRORS";
+    else if (failed > 0) status = "FAILED";
     else status = "COMPLETED";
 
     migrationsRepository.update(jobId, { status, completedAt: new Date().toISOString() });
+    this.log(
+      jobId,
+      status === "FAILED" ? "error" : status === "COMPLETED_WITH_ERRORS" ? "warning" : "success",
+      `Migration finished — ${done} transferred, ${skipped} skipped, ${failed} failed.`
+    );
 
     // Best-effort sweep of whatever's left in the job's temp dir (should
     // just be the empty directory itself — each file already removed its

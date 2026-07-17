@@ -49,29 +49,32 @@ export interface UploadFileParams {
   sizeBytes: number;
   stream: Readable;
   duplicateStrategy: DuplicateStrategy;
+  credentials?: unknown;
   onProgress?: (progress: UploadProgress) => void;
 }
 
 /**
- * Capability surface for a provider that can be written to. Unlike
- * SourceProvider, methods here take no per-call `credentials` — the only
- * destination implemented so far (Google Drive) authenticates once at
- * startup from a service account configured via environment variables
- * (no OAuth yet, per ARCHITECTURE.md §1). A future OAuth-based destination
- * would add a credentials parameter to its own methods without forcing a
- * change on this interface's other implementations or callers.
+ * Capability surface for a provider that can be written to. `credentials`
+ * is optional and opaque, same as SourceProvider's — Google Drive accepts
+ * either real per-connection OAuth tokens or, when omitted, falls back to
+ * a shared service account configured via environment variables (see
+ * ARCHITECTURE.md §1). A provider that only supports one auth mode is free
+ * to ignore whichever shape it doesn't use.
  */
 export interface DestinationProvider {
   readonly type: ProviderType;
 
-  /** Verifies the provider's configured credentials and returns an identity label. */
-  testConnection(): Promise<{ account: string }>;
+  /** Verifies the given (or configured) credentials and returns an identity label. */
+  testConnection(credentials?: unknown): Promise<{ account: string }>;
+
+  /** Lists only the subfolders of `folderId` (root when omitted) — used to let a user pick an upload target. */
+  listFolders(credentials: unknown, folderId?: string): Promise<RemoteNode[]>;
 
   /** Creates a folder under `parentId` and returns it. */
-  createFolder(parentId: string, name: string): Promise<RemoteNode>;
+  createFolder(credentials: unknown, parentId: string, name: string): Promise<RemoteNode>;
 
   /** Looks up a same-named child of `parentId`, or null if there isn't one. */
-  exists(parentId: string, filename: string): Promise<RemoteNode | null>;
+  exists(credentials: unknown, parentId: string, filename: string): Promise<RemoteNode | null>;
 
   /**
    * Uploads `stream` under `parentId`, applying `duplicateStrategy` if a

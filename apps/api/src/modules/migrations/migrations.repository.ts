@@ -1,5 +1,7 @@
 import { createId } from "../../common/utils/id.js";
-import type { FileTransfer, MigrationJob } from "../../types/models.js";
+import type { FileTransfer, LogLevel, MigrationJob, MigrationLogEntry } from "../../types/models.js";
+
+const MAX_LOGS_PER_JOB = 500;
 
 /**
  * In-memory stand-in for the Prisma-backed MigrationJob/FileTransfer tables
@@ -9,6 +11,7 @@ import type { FileTransfer, MigrationJob } from "../../types/models.js";
 export class MigrationsRepository {
   private readonly jobs = new Map<string, MigrationJob>();
   private readonly files = new Map<string, FileTransfer[]>();
+  private readonly logs = new Map<string, MigrationLogEntry[]>();
 
   seedJob(job: MigrationJob, files: FileTransfer[]): void {
     this.jobs.set(job.id, job);
@@ -68,6 +71,26 @@ export class MigrationsRepository {
 
   findFile(jobId: string, fileId: string): FileTransfer | undefined {
     return this.listFiles(jobId).find((f) => f.id === fileId);
+  }
+
+  /** Appends a real-time activity log entry, newest first, capped per job. */
+  addLog(jobId: string, level: LogLevel, message: string): MigrationLogEntry {
+    const entry: MigrationLogEntry = {
+      id: createId("log"),
+      migrationJobId: jobId,
+      level,
+      message,
+      timestamp: new Date().toISOString(),
+    };
+    const existing = this.logs.get(jobId) ?? [];
+    existing.unshift(entry);
+    if (existing.length > MAX_LOGS_PER_JOB) existing.length = MAX_LOGS_PER_JOB;
+    this.logs.set(jobId, existing);
+    return entry;
+  }
+
+  listLogs(jobId: string): MigrationLogEntry[] {
+    return this.logs.get(jobId) ?? [];
   }
 
   updateFile(

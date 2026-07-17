@@ -1,6 +1,6 @@
 import { CopyX, HelpCircle, Replace, SkipForward } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { DUPLICATE_OPTIONS } from "@/lib/mock-data";
+import { DUPLICATE_OPTIONS } from "@/lib/duplicate-options";
 import { cn } from "@/lib/utils";
 import type { DuplicateStrategy } from "@/types";
 

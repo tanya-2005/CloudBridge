@@ -2,6 +2,7 @@ import { Router } from "express";
 import { validateRequest } from "../../common/middleware/validate-request.js";
 import { ConnectionsController } from "./connections.controller.js";
 import { connectionsRepository } from "./connections.repository.js";
+import { googleOAuthRouter } from "./google-oauth.routes.js";
 import {
   browseQuerySchema,
   connectionFileParamsSchema,
@@ -16,6 +17,11 @@ const service = new ConnectionsService(connectionsRepository);
 const controller = new ConnectionsController(service);
 
 export const connectionsRouter = Router();
+
+// Mounted before the /:id routes — /oauth/... has more path segments than
+// the single-segment :id pattern ever matches, but keeping it first here
+// is the clearer convention regardless.
+connectionsRouter.use("/oauth", googleOAuthRouter);
 
 connectionsRouter.get("/", controller.list);
 

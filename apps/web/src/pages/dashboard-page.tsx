@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { PlayCircle, RotateCcw } from "lucide-react";
+import { AlertCircle, PlayCircle, RotateCcw } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,21 +8,26 @@ import { CloudConnectionCard } from "@/components/dashboard/cloud-connection-car
 import { DuplicateOptions } from "@/components/dashboard/duplicate-options";
 import { TransferProgressCard } from "@/components/dashboard/transfer-progress-card";
 import { ActivityLog } from "@/components/dashboard/activity-log";
+import { ProvidersErrorBanner } from "@/components/dashboard/providers-error-banner";
 import { useMigration } from "@/context/migration-context";
 
 export function DashboardPage() {
   const navigate = useNavigate();
   const m = useMigration();
 
-  const handleStart = () => {
-    m.startMigration();
-    navigate("/progress");
+  const handleStart = async () => {
+    const started = await m.startMigration();
+    if (started) navigate("/progress");
   };
 
   return (
     <AppShell title="Dashboard" subtitle="Manage your cloud-to-cloud migrations">
       <div className="flex flex-col gap-6">
         <StatsRow />
+
+        {m.providersError && (
+          <ProvidersErrorBanner message={m.providersError} onRetry={m.reloadProviders} />
+        )}
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="flex flex-col gap-6 lg:col-span-2">
@@ -38,9 +43,11 @@ export function DashboardPage() {
                   <CloudConnectionCard
                     role="source"
                     providerId={m.sourceProviderId}
+                    providers={m.providers}
                     onProviderChange={m.setSourceProviderId}
                     connection={m.sourceConnection}
-                    onConnect={() => m.connect("source")}
+                    onConnect={(credentials) => m.connect("source", credentials)}
+                    onConnectOAuth={() => m.connectOAuth("source")}
                     onDisconnect={() => m.disconnect("source")}
                     folder={m.sourceFolder}
                     onFolderChange={m.setSourceFolder}
@@ -48,9 +55,11 @@ export function DashboardPage() {
                   <CloudConnectionCard
                     role="destination"
                     providerId={m.destProviderId}
+                    providers={m.providers}
                     onProviderChange={m.setDestProviderId}
                     connection={m.destConnection}
-                    onConnect={() => m.connect("destination")}
+                    onConnect={(credentials) => m.connect("destination", credentials)}
+                    onConnectOAuth={() => m.connectOAuth("destination")}
                     onDisconnect={() => m.disconnect("destination")}
                     folder={m.destFolder}
                     onFolderChange={m.setDestFolder}
@@ -65,25 +74,33 @@ export function DashboardPage() {
                   />
                 </div>
 
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <Button
-                    size="lg"
-                    className="w-full sm:w-auto"
-                    disabled={!m.canStart}
-                    onClick={handleStart}
-                  >
-                    <PlayCircle className="h-4 w-4" />
-                    Start Migration
-                  </Button>
-                  {m.status !== "idle" && (
-                    <Button variant="ghost" onClick={m.resetMigration} className="w-full sm:w-auto">
-                      <RotateCcw className="h-4 w-4" />
-                      Reset
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <Button
+                      size="lg"
+                      className="w-full sm:w-auto"
+                      disabled={!m.canStart}
+                      onClick={handleStart}
+                    >
+                      <PlayCircle className="h-4 w-4" />
+                      Start Migration
                     </Button>
-                  )}
-                  {!m.canStart && m.status === "idle" && (
-                    <p className="text-xs text-muted-foreground">
-                      Connect both accounts and pick folders to enable this.
+                    {m.status !== "idle" && (
+                      <Button variant="ghost" onClick={m.resetMigration} className="w-full sm:w-auto">
+                        <RotateCcw className="h-4 w-4" />
+                        Reset
+                      </Button>
+                    )}
+                    {!m.canStart && m.status === "idle" && (
+                      <p className="text-xs text-muted-foreground">
+                        Connect both accounts and pick folders to enable this.
+                      </p>
+                    )}
+                  </div>
+                  {m.startError && (
+                    <p className="flex items-start gap-1.5 text-xs text-destructive">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {m.startError}
                     </p>
                   )}
                 </div>

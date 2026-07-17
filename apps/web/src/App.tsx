@@ -4,6 +4,7 @@ import { HomePage } from "@/pages/home-page";
 import { DashboardPage } from "@/pages/dashboard-page";
 import { TransferPage } from "@/pages/transfer-page";
 import { ProgressPage } from "@/pages/progress-page";
+import { OAuthCallbackPage } from "@/pages/oauth-callback-page";
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/transfer" element={<TransferPage />} />
         <Route path="/progress" element={<ProgressPage />} />
+        <Route path="/oauth/google/callback" element={<OAuthCallbackPage />} />
       </Routes>
     </TooltipProvider>
   );

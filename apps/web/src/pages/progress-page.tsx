@@ -74,6 +74,8 @@ export function ProgressPage() {
               totalBytes={m.totalBytes}
               transferredBytes={m.transferredBytes}
               startedAt={m.startedAt}
+              onCancel={m.cancelMigration}
+              onRetry={m.retryMigration}
             />
           </CardContent>
         </Card>

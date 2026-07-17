@@ -35,6 +35,10 @@ export class MigrationsController {
     sendSuccess(res, this.service.listConflicts(req.params.id as string));
   };
 
+  listLogs = (req: Request, res: Response): void => {
+    sendSuccess(res, this.service.listLogs(req.params.id as string));
+  };
+
   resolveConflict = (req: Request, res: Response): void => {
     sendSuccess(
       res,

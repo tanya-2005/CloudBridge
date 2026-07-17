@@ -44,6 +44,7 @@ export class MigrationsService {
       createdAt: now,
     };
     const created = this.repository.create(job, []);
+    this.repository.addLog(created.id, "info", "Migration created.");
     migrationEngine.runInBackground(created.id);
     return created;
   }
@@ -55,6 +56,11 @@ export class MigrationsService {
     }
     migrationEngine.cancelJob(id);
     return this.repository.update(id, { status: "CANCELLED", completedAt: new Date().toISOString() })!;
+  }
+
+  listLogs(id: string) {
+    this.getById(id);
+    return this.repository.listLogs(id);
   }
 
   retry(id: string): MigrationJob {
@@ -98,6 +104,7 @@ export class MigrationsService {
 
     if (input.action === "SKIP") {
       const updated = this.repository.updateFile(id, fileId, { status: "SKIPPED", duplicateAction: "SKIP" })!;
+      this.repository.addLog(id, "info", `Skipped "${file.filename}" (duplicate).`);
       migrationEngine.maybeFinalize(id);
       return updated;
     }
@@ -107,6 +114,13 @@ export class MigrationsService {
       duplicateAction: input.action === "OVERWRITE" ? "OVERWRITE" : "RENAME",
       filename: input.action === "RENAME" && input.newName ? input.newName : file.filename,
     })!;
+    this.repository.addLog(
+      id,
+      "info",
+      input.action === "OVERWRITE"
+        ? `Replacing existing "${file.filename}" at the destination.`
+        : `Renaming "${file.filename}" to avoid the conflict.`
+    );
 
     if (migrationEngine.isRealJob(id)) {
       migrationEngine.retryFile(id, fileId);

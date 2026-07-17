@@ -54,6 +54,12 @@ migrationsRouter.get(
   controller.listConflicts
 );
 
+migrationsRouter.get(
+  "/:id/logs",
+  validateRequest({ params: migrationIdParamsSchema }),
+  controller.listLogs
+);
+
 migrationsRouter.post(
   "/:id/conflicts/:fileId/resolve",
   validateRequest({ params: migrationFileParamsSchema, body: resolveConflictSchema }),

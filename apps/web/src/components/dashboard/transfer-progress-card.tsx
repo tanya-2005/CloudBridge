@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useMigration } from "@/context/migration-context";
 import { formatBytes } from "@/lib/utils";
+import type { MigrationStatus } from "@/types";
 
 export function TransferProgressCard() {
   const { status, files, totalBytes, transferredBytes } = useMigration();
@@ -49,7 +50,14 @@ export function TransferProgressCard() {
   );
 }
 
-function StatusChip({ status }: { status: string }) {
+function StatusChip({ status }: { status: MigrationStatus }) {
+  if (status === "pending" || status === "planning") {
+    return (
+      <Badge variant="warning">
+        <Loader2 className="h-3 w-3 animate-spin" /> {status === "planning" ? "Planning" : "Pending"}
+      </Badge>
+    );
+  }
   if (status === "running") {
     return (
       <Badge variant="warning">
@@ -58,6 +66,8 @@ function StatusChip({ status }: { status: string }) {
     );
   }
   if (status === "completed") return <Badge variant="success">Completed</Badge>;
+  if (status === "completed_with_errors") return <Badge variant="warning">Completed with errors</Badge>;
   if (status === "failed") return <Badge variant="destructive">Failed</Badge>;
+  if (status === "cancelled") return <Badge variant="muted">Cancelled</Badge>;
   return <Badge variant="muted">Idle</Badge>;
 }

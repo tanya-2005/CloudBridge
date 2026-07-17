@@ -13,7 +13,7 @@ import { PublicFooter } from "@/components/layout/public-footer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CLOUD_PROVIDERS } from "@/lib/mock-data";
+import { useMigration } from "@/context/migration-context";
 import { cn } from "@/lib/utils";
 
 const FEATURES = [
@@ -50,6 +50,8 @@ const FEATURES = [
 ];
 
 export function HomePage() {
+  const { providers } = useMigration();
+
   return (
     <div className="flex min-h-screen flex-col">
       <PublicHeader />
@@ -99,7 +101,7 @@ export function HomePage() {
               Supported providers
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3">
-              {CLOUD_PROVIDERS.map((provider) => (
+              {providers.map((provider) => (
                 <div
                   key={provider.id}
                   className={cn(

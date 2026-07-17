@@ -1,21 +1,16 @@
 import { useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
-import { CheckCircle2, PlayCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, PlayCircle } from "lucide-react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CloudConnectionCard } from "@/components/dashboard/cloud-connection-card";
 import { DuplicateOptions } from "@/components/dashboard/duplicate-options";
+import { ProvidersErrorBanner } from "@/components/dashboard/providers-error-banner";
 import { useMigration } from "@/context/migration-context";
-import {
-  DUPLICATE_OPTIONS,
-  MOCK_SOURCE_TREE,
-  findNodeByPath,
-  getProvider,
-  summarizeNode,
-} from "@/lib/mock-data";
-import { cn, formatBytes } from "@/lib/utils";
+import { DUPLICATE_OPTIONS } from "@/lib/duplicate-options";
+import { cn } from "@/lib/utils";
 
 function StepSection({
   step,
@@ -60,19 +55,20 @@ export function TransferPage() {
   const connectDone =
     m.sourceConnection.status === "connected" && m.destConnection.status === "connected";
   const foldersDone = !!m.sourceFolder && !!m.destFolder;
-
-  const sourceNode = m.sourceFolder ? findNodeByPath(MOCK_SOURCE_TREE, m.sourceFolder) : null;
-  const estimate = sourceNode ? summarizeNode(sourceNode) : null;
   const strategyLabel = DUPLICATE_OPTIONS.find((d) => d.id === m.duplicateStrategy)?.label;
 
-  const handleStart = () => {
-    m.startMigration();
-    navigate("/progress");
+  const handleStart = async () => {
+    const started = await m.startMigration();
+    if (started) navigate("/progress");
   };
 
   return (
     <AppShell title="Transfer" subtitle="Set up a new migration step by step">
       <div className="mx-auto flex max-w-3xl flex-col gap-6">
+        {m.providersError && (
+          <ProvidersErrorBanner message={m.providersError} onRetry={m.reloadProviders} />
+        )}
+
         <StepSection
           step={1}
           title="Connect your accounts"
@@ -83,9 +79,11 @@ export function TransferPage() {
             <CloudConnectionCard
               role="source"
               providerId={m.sourceProviderId}
+              providers={m.providers}
               onProviderChange={m.setSourceProviderId}
               connection={m.sourceConnection}
-              onConnect={() => m.connect("source")}
+              onConnect={(credentials) => m.connect("source", credentials)}
+              onConnectOAuth={() => m.connectOAuth("source")}
               onDisconnect={() => m.disconnect("source")}
               folder={m.sourceFolder}
               onFolderChange={m.setSourceFolder}
@@ -93,9 +91,11 @@ export function TransferPage() {
             <CloudConnectionCard
               role="destination"
               providerId={m.destProviderId}
+              providers={m.providers}
               onProviderChange={m.setDestProviderId}
               connection={m.destConnection}
-              onConnect={() => m.connect("destination")}
+              onConnect={(credentials) => m.connect("destination", credentials)}
+              onConnectOAuth={() => m.connectOAuth("destination")}
               onDisconnect={() => m.disconnect("destination")}
               folder={m.destFolder}
               onFolderChange={m.setDestFolder}
@@ -122,10 +122,10 @@ export function TransferPage() {
               <div>
                 <dt className="text-xs text-muted-foreground">Source</dt>
                 <dd className="text-sm font-medium">
-                  {getProvider(m.sourceProviderId).name}
+                  {m.getProviderMeta(m.sourceProviderId)?.name ?? m.sourceProviderId}
                   {m.sourceFolder && (
                     <span className="block truncate text-xs font-normal text-muted-foreground">
-                      {m.sourceFolder}
+                      {m.sourceFolder.label}
                     </span>
                   )}
                 </dd>
@@ -133,10 +133,10 @@ export function TransferPage() {
               <div>
                 <dt className="text-xs text-muted-foreground">Destination</dt>
                 <dd className="text-sm font-medium">
-                  {getProvider(m.destProviderId).name}
+                  {m.getProviderMeta(m.destProviderId)?.name ?? m.destProviderId}
                   {m.destFolder && (
                     <span className="block truncate text-xs font-normal text-muted-foreground">
-                      {m.destFolder}
+                      {m.destFolder.label}
                     </span>
                   )}
                 </dd>
@@ -147,20 +147,18 @@ export function TransferPage() {
                   <Badge variant="secondary">{strategyLabel}</Badge>
                 </dd>
               </div>
-              <div>
-                <dt className="text-xs text-muted-foreground">Estimated scope</dt>
-                <dd className="text-sm font-medium">
-                  {estimate
-                    ? `${estimate.fileCount} files · ${formatBytes(estimate.totalBytes)}`
-                    : "Select a source folder to estimate"}
-                </dd>
-              </div>
             </dl>
 
             <Button size="lg" disabled={!m.canStart} onClick={handleStart} className="self-start">
               <PlayCircle className="h-4 w-4" />
               Start Migration
             </Button>
+            {m.startError && (
+              <p className="flex items-start gap-1.5 text-xs text-destructive">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                {m.startError}
+              </p>
+            )}
             {!connectDone && (
               <p className="text-xs text-muted-foreground">
                 Connect both accounts to continue.

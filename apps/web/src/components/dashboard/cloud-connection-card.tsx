@@ -1,6 +1,8 @@
-import { Check, Loader2, LogIn, LogOut, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, Check, Globe, Loader2, LogIn, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -8,33 +10,50 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CLOUD_PROVIDERS } from "@/lib/mock-data";
+import { getProviderDisplay } from "@/lib/providers-config";
 import { cn } from "@/lib/utils";
-import type { ConnectionState, ProviderId, ProviderRole } from "@/types";
+import type { CloudProviderMeta, ConnectionState, ProviderId, ProviderRole, SelectedFolder } from "@/types";
 import { FolderPickerDialog } from "@/components/dashboard/folder-picker-dialog";
 
 interface CloudConnectionCardProps {
   role: ProviderRole;
   providerId: ProviderId;
+  providers: CloudProviderMeta[];
   onProviderChange: (id: ProviderId) => void;
   connection: ConnectionState;
-  onConnect: () => void;
+  onConnect: (credentials?: unknown) => void;
+  onConnectOAuth: () => void;
   onDisconnect: () => void;
-  folder: string | null;
-  onFolderChange: (path: string) => void;
+  folder: SelectedFolder | null;
+  onFolderChange: (folder: SelectedFolder) => void;
 }
 
 export function CloudConnectionCard({
   role,
   providerId,
+  providers,
   onProviderChange,
   connection,
   onConnect,
+  onConnectOAuth,
   onDisconnect,
   folder,
   onFolderChange,
 }: CloudConnectionCardProps) {
-  const options = CLOUD_PROVIDERS.filter((p) => p.roles.includes(role));
+  const options = providers.filter((p) => p.roles.includes(role));
+  const selected = providers.find((p) => p.id === providerId);
+  // Falls back to display-only metadata (name/shortName/authMethod) while
+  // the real provider list is still loading or failed to load, so buttons
+  // read "Connect Drive" instead of the raw enum value "Connect GOOGLE_DRIVE".
+  const display = getProviderDisplay(providerId);
+  const displayShortName = selected?.shortName ?? display.shortName;
+  const authMethod = selected?.authMethod ?? display.authMethod;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const isIdle = connection.status !== "connected" && connection.status !== "connecting";
+  const needsCredentialForm = authMethod === "credentials" && isIdle;
+  const needsOAuthButton = authMethod === "oauth" && isIdle;
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
@@ -80,31 +99,74 @@ export function CloudConnectionCard({
             <LogOut className="h-3.5 w-3.5" />
           </Button>
         </div>
+      ) : connection.status === "connecting" ? (
+        <Button variant="outline" className="w-full" disabled>
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {authMethod === "oauth" ? "Waiting for Google…" : "Connecting…"}
+        </Button>
+      ) : needsCredentialForm ? (
+        <form
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onConnect({ email, password });
+          }}
+        >
+          <Input
+            type="email"
+            placeholder="Email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="username"
+          />
+          <Input
+            type="password"
+            placeholder="Password"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+          <Button type="submit" variant="outline" className="w-full" disabled={!selected?.available}>
+            <LogIn className="h-4 w-4" />
+            Connect {displayShortName}
+          </Button>
+        </form>
+      ) : needsOAuthButton ? (
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={onConnectOAuth}
+          disabled={!selected?.available}
+        >
+          <Globe className="h-4 w-4" />
+          Sign in with Google
+        </Button>
       ) : (
         <Button
           variant="outline"
           className="w-full"
-          onClick={onConnect}
-          disabled={connection.status === "connecting"}
+          onClick={() => onConnect()}
+          disabled={!selected?.available}
         >
-          {connection.status === "connecting" ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Connecting…
-            </>
-          ) : (
-            <>
-              <LogIn className="h-4 w-4" />
-              Connect {CLOUD_PROVIDERS.find((p) => p.id === providerId)?.shortName}
-            </>
-          )}
+          <LogIn className="h-4 w-4" />
+          Connect {displayShortName}
         </Button>
+      )}
+
+      {connection.status === "error" && connection.error && (
+        <p className="flex items-start gap-1.5 text-xs text-destructive">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          {connection.error}
+        </p>
       )}
 
       <FolderPickerDialog
         role={role}
+        connectionId={connection.id}
         disabled={connection.status !== "connected"}
-        selectedPath={folder}
+        selected={folder}
         onSelect={onFolderChange}
       />
     </div>

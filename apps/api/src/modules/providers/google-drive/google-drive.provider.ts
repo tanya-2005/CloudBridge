@@ -6,7 +6,9 @@ import type {
   UploadOutcome,
 } from "../provider.interface.js";
 import { getDriveClient } from "./google-drive.client.js";
+import { getDriveRootFolderId } from "./google-drive.config.js";
 import { runDriveCall } from "./google-drive.errors.js";
+import { getOAuthDriveClient, isOAuthCredentials } from "./google-drive.oauth.js";
 import { withProgress } from "./progress-stream.js";
 
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
@@ -26,20 +28,46 @@ function escapeQueryValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
+/**
+ * Resolves whichever Drive client this connection actually authenticates
+ * with: real per-connection OAuth tokens when present, otherwise the
+ * single shared service account configured via environment variables.
+ * Every method below goes through this instead of picking a client
+ * itself, so the two auth modes stay interchangeable everywhere.
+ */
+function resolveClient(credentials: unknown): drive_v3.Drive {
+  if (isOAuthCredentials(credentials)) return getOAuthDriveClient(credentials);
+  return getDriveClient();
+}
+
 export class GoogleDriveProvider implements DestinationProvider {
   readonly type = "GOOGLE_DRIVE" as const;
 
-  async testConnection(): Promise<{ account: string }> {
+  async testConnection(credentials?: unknown): Promise<{ account: string }> {
     return runDriveCall(async () => {
-      const drive = getDriveClient();
+      const drive = resolveClient(credentials);
       const res = await drive.about.get({ fields: "user" });
       return { account: res.data.user?.emailAddress ?? "unknown" };
     });
   }
 
-  async createFolder(parentId: string, name: string): Promise<RemoteNode> {
+  async listFolders(credentials: unknown, folderId?: string): Promise<RemoteNode[]> {
     return runDriveCall(async () => {
-      const drive = getDriveClient();
+      const drive = resolveClient(credentials);
+      const parentId = folderId ?? getDriveRootFolderId();
+      const res = await drive.files.list({
+        q: `'${parentId}' in parents and mimeType = '${FOLDER_MIME_TYPE}' and trashed = false`,
+        fields: "files(id, name, mimeType)",
+        pageSize: 200,
+        orderBy: "name",
+      });
+      return (res.data.files ?? []).map(toRemoteNode);
+    });
+  }
+
+  async createFolder(credentials: unknown, parentId: string, name: string): Promise<RemoteNode> {
+    return runDriveCall(async () => {
+      const drive = resolveClient(credentials);
       const res = await drive.files.create({
         requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
         fields: "id, name, mimeType",
@@ -48,9 +76,9 @@ export class GoogleDriveProvider implements DestinationProvider {
     });
   }
 
-  async exists(parentId: string, filename: string): Promise<RemoteNode | null> {
+  async exists(credentials: unknown, parentId: string, filename: string): Promise<RemoteNode | null> {
     return runDriveCall(async () => {
-      const drive = getDriveClient();
+      const drive = resolveClient(credentials);
       const res = await drive.files.list({
         q: `'${parentId}' in parents and name = '${escapeQueryValue(filename)}' and trashed = false`,
         fields: "files(id, name, mimeType, size)",
@@ -62,10 +90,10 @@ export class GoogleDriveProvider implements DestinationProvider {
   }
 
   async uploadFile(params: UploadFileParams): Promise<UploadOutcome> {
-    const { parentId, sizeBytes, stream, duplicateStrategy, onProgress } = params;
+    const { parentId, sizeBytes, stream, duplicateStrategy, credentials, onProgress } = params;
     let filename = params.filename;
 
-    const existing = await this.exists(parentId, filename);
+    const existing = await this.exists(credentials, parentId, filename);
 
     if (existing) {
       switch (duplicateStrategy) {
@@ -75,7 +103,7 @@ export class GoogleDriveProvider implements DestinationProvider {
           return { status: "conflict", existing };
         case "OVERWRITE": {
           const file = await runDriveCall(async () => {
-            const drive = getDriveClient();
+            const drive = resolveClient(credentials);
             const res = await drive.files.update({
               fileId: existing.id,
               media: { body: withProgress(stream, sizeBytes, onProgress) },
@@ -86,13 +114,13 @@ export class GoogleDriveProvider implements DestinationProvider {
           return { status: "uploaded", file };
         }
         case "RENAME":
-          filename = await this.resolveAvailableName(parentId, filename);
+          filename = await this.resolveAvailableName(credentials, parentId, filename);
           break;
       }
     }
 
     const file = await runDriveCall(async () => {
-      const drive = getDriveClient();
+      const drive = resolveClient(credentials);
       const res = await drive.files.create({
         requestBody: { name: filename, parents: [parentId] },
         media: { body: withProgress(stream, sizeBytes, onProgress) },
@@ -103,14 +131,18 @@ export class GoogleDriveProvider implements DestinationProvider {
     return { status: "uploaded", file };
   }
 
-  private async resolveAvailableName(parentId: string, filename: string): Promise<string> {
+  private async resolveAvailableName(
+    credentials: unknown,
+    parentId: string,
+    filename: string
+  ): Promise<string> {
     const dotIndex = filename.lastIndexOf(".");
     const hasExtension = dotIndex > 0;
     const base = hasExtension ? filename.slice(0, dotIndex) : filename;
     const ext = hasExtension ? filename.slice(dotIndex) : "";
 
     let candidate = filename;
-    for (let suffix = 1; await this.exists(parentId, candidate); suffix++) {
+    for (let suffix = 1; await this.exists(credentials, parentId, candidate); suffix++) {
       candidate = `${base} (${suffix})${ext}`;
     }
     return candidate;

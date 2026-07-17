@@ -59,3 +59,13 @@ export interface RemoteNode {
   sizeBytes?: number;
   children?: RemoteNode[];
 }
+
+export type LogLevel = "info" | "success" | "warning" | "error";
+
+export interface MigrationLogEntry {
+  id: string;
+  migrationJobId: string;
+  level: LogLevel;
+  message: string;
+  timestamp: string;
+}

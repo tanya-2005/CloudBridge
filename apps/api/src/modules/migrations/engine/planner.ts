@@ -12,6 +12,7 @@ interface PlanContext {
   sourceProvider: SourceProvider;
   sourceCredentials: unknown;
   destProvider: DestinationProvider;
+  destCredentials: unknown;
 }
 
 /**
@@ -42,7 +43,12 @@ export async function planMigrationTree(
   }));
 
   for (const folder of subfolders) {
-    const destFolderId = await resolveDestFolder(ctx.destProvider, destParentId, folder.name);
+    const destFolderId = await resolveDestFolder(
+      ctx.destProvider,
+      ctx.destCredentials,
+      destParentId,
+      folder.name
+    );
     const nested = await planMigrationTree(
       ctx,
       folder.id,
@@ -58,11 +64,12 @@ export async function planMigrationTree(
 /** Reuses an existing same-named destination folder instead of creating a duplicate on re-runs. */
 async function resolveDestFolder(
   destProvider: DestinationProvider,
+  destCredentials: unknown,
   parentId: string,
   name: string
 ): Promise<string> {
-  const existing = await destProvider.exists(parentId, name);
+  const existing = await destProvider.exists(destCredentials, parentId, name);
   if (existing && existing.type === "folder") return existing.id;
-  const created = await destProvider.createFolder(parentId, name);
+  const created = await destProvider.createFolder(destCredentials, parentId, name);
   return created.id;
 }
