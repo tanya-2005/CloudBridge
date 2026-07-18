@@ -1,3 +1,4 @@
+import type { EventEmitter } from "node:events";
 import { Storage } from "megajs";
 
 export interface MegaCredentials {
@@ -19,9 +20,34 @@ export async function getMegaSession(credentials: MegaCredentials): Promise<Stor
   if (cached && cached.status === "ready") return cached;
 
   const storage = new Storage({ email: credentials.email, password: credentials.password });
+  attachErrorGuard(storage, key);
   await storage.ready;
   sessions.set(key, storage);
   return storage;
+}
+
+/**
+ * megajs' Storage — and its underlying `api` transport — are EventEmitters
+ * that can emit "error" asynchronously (a mid-session network hiccup, DNS
+ * failure, ...) completely outside of any promise this module awaits.
+ * Node's default behavior for an unhandled "error" event is to throw and
+ * crash the whole process, which took the entire API server down during a
+ * real test even though the request that triggered it had nothing to do
+ * with whatever else was in flight at the time. Every session needs this
+ * regardless of what else is watching — in-flight requests still reject on
+ * their own and get translated normally by runMegaCall/translateMegaError.
+ */
+function attachErrorGuard(storage: Storage, key: string): void {
+  const onError = (err: unknown) => {
+    console.error(`MEGA session error for ${key}:`, err);
+    sessions.delete(key);
+  };
+  // megajs' own .d.ts has a narrower `on()` overload than its actual
+  // runtime EventEmitter (Storage/API both genuinely extend it — see the
+  // library's own internal `this.emit("error", ...)` calls), so this cast
+  // is to the real runtime type, not a broad type-safety escape hatch.
+  (storage as unknown as EventEmitter).on("error", onError);
+  (storage.api as unknown as EventEmitter).on("error", onError);
 }
 
 export function dropMegaSession(email: string): void {
