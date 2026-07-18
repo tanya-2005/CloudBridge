@@ -14,7 +14,7 @@ function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/transfer" element={<TransferPage />} />
         <Route path="/progress" element={<ProgressPage />} />
-        <Route path="/oauth/google/callback" element={<OAuthCallbackPage />} />
+        <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
       </Routes>
     </TooltipProvider>
   );

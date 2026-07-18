@@ -22,7 +22,7 @@ export async function runDriveCall<T>(op: () => Promise<T>): Promise<T> {
   }
 }
 
-function translateDriveError(err: unknown): AppError {
+export function translateDriveError(err: unknown): AppError {
   if (err instanceof AppError) return err;
 
   const status = extractHttpStatus(err);

@@ -9,7 +9,7 @@
  * listens for both and takes whichever arrives first.
  */
 export interface OAuthResult {
-  type: "google-oauth-result";
+  type: "oauth-result";
   success: boolean;
   role?: "source" | "destination";
   message?: string;

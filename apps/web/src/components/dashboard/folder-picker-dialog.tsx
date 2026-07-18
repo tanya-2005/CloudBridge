@@ -19,6 +19,8 @@ const ROOT_CRUMB = { id: "/", name: "Root" };
 
 interface FolderPickerDialogProps {
   role: ProviderRole;
+  /** The actually-selected provider's display name (e.g. "MEGA", "Google Drive") — not derived from `role`, since any provider can be picked for either role. */
+  providerName: string;
   connectionId: string | null;
   disabled?: boolean;
   selected: SelectedFolder | null;
@@ -27,6 +29,7 @@ interface FolderPickerDialogProps {
 
 export function FolderPickerDialog({
   role,
+  providerName,
   connectionId,
   disabled,
   selected,
@@ -100,7 +103,7 @@ export function FolderPickerDialog({
             Choose {role === "source" ? "a source folder" : "a destination folder"}
           </DialogTitle>
           <DialogDescription>
-            Browsing your real {role === "source" ? "MEGA" : "Google Drive"} account.
+            Browsing your real {providerName} account.
           </DialogDescription>
         </DialogHeader>
 

@@ -61,7 +61,7 @@ interface MigrationContextValue {
   setSourceProviderId: (id: ProviderId) => void;
   setDestProviderId: (id: ProviderId) => void;
   connect: (role: ProviderRole, credentials?: unknown) => Promise<void>;
-  /** Opens a real Google consent popup and resolves the connection once it reports back. */
+  /** Opens the selected provider's real OAuth consent popup and resolves the connection once it reports back. */
   connectOAuth: (role: ProviderRole) => void;
   disconnect: (role: ProviderRole) => Promise<void>;
   setSourceFolder: (folder: SelectedFolder | null) => void;
@@ -198,7 +198,19 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
   );
 
   const connectOAuth = useCallback((role: ProviderRole) => {
+    const providerId = role === "source" ? sourceProviderId : destProviderId;
     const setConn = role === "source" ? setSourceConnection : setDestConnection;
+    const oauthSlug = getProviderDisplay(providerId).oauthSlug;
+
+    if (!oauthSlug) {
+      setConn({
+        id: null,
+        status: "error",
+        error: `${getProviderMeta(providerId)?.name ?? providerId} doesn't support sign-in yet.`,
+      });
+      return;
+    }
+
     setConn({ id: null, status: "connecting" });
 
     try {
@@ -208,8 +220,8 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     }
 
     const popup = window.open(
-      `${API_BASE}/connections/oauth/google/start?role=${role}`,
-      "cloudbridge-google-oauth",
+      `${API_BASE}/connections/oauth/${oauthSlug}/start?role=${role}`,
+      `cloudbridge-oauth-${role}`,
       "width=520,height=650"
     );
 
@@ -231,7 +243,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     };
 
     const applyResult = (data: Partial<OAuthResult> | undefined) => {
-      if (!data || data.type !== "google-oauth-result") return;
+      if (!data || data.type !== "oauth-result") return;
       if (data.role && data.role !== role) return; // meant for the other connection slot
 
       settled = true;
@@ -240,7 +252,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
       if (data.success && data.connectionId) {
         setConn({ id: data.connectionId, status: "connected", account: data.account });
       } else {
-        setConn({ id: null, status: "error", error: data.message ?? "Google sign-in failed." });
+        setConn({ id: null, status: "error", error: data.message ?? "Sign-in failed." });
       }
     };
 
@@ -250,9 +262,10 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     // window.close() ~300ms after writing the result, and in practice the
     // `storage` event doesn't reliably reach this window before that
     // popup's process tears down (likely tied to the process split COOP
-    // forces on the cross-origin hop through Google), so polling is the
-    // channel that's actually dependable. `window.opener` itself can't be
-    // relied on at all here — see google-oauth.routes.ts for why.
+    // forces on the cross-origin hop through the provider's real consent
+    // domain), so polling is the channel that's actually dependable.
+    // `window.opener` itself can't be relied on at all here — see
+    // oauth.routes.ts for why.
     const readStoredResult = (): Partial<OAuthResult> | undefined => {
       try {
         const raw = localStorage.getItem(OAUTH_RESULT_STORAGE_KEY);
@@ -311,7 +324,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
         setConn(idleConnection());
       }
     }, 250);
-  }, []);
+  }, [sourceProviderId, destProviderId, getProviderMeta]);
 
   const disconnect = useCallback(async (role: ProviderRole) => {
     const conn = role === "source" ? sourceConnection : destConnection;

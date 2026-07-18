@@ -4,8 +4,8 @@ import path from "node:path";
 
 /**
  * Implements the "Temporary Storage" stage of the migration workflow
- * (Download from MEGA → Temporary Storage → Upload to Google Drive →
- * Delete temporary file). Files live under the OS temp directory rather
+ * (Download from source provider → Temporary Storage → Upload to
+ * destination provider → Delete temporary file). Files live under the OS temp directory rather
  * than inside the repo, namespaced per job so a crashed job's leftovers
  * are easy to spot and don't collide with a concurrent one.
  */

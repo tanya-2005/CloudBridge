@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertCircle, Check, Globe, Loader2, LogIn, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,8 +48,15 @@ export function CloudConnectionCard({
   const display = getProviderDisplay(providerId);
   const displayShortName = selected?.shortName ?? display.shortName;
   const authMethod = selected?.authMethod ?? display.authMethod;
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const credentialFields = display.credentialFields ?? [];
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+
+  // Different providers collect different fields (or none at all, for
+  // OAuth) — clear whatever was typed for the previous selection instead
+  // of silently carrying it over.
+  useEffect(() => {
+    setFieldValues({});
+  }, [providerId]);
 
   const isIdle = connection.status !== "connected" && connection.status !== "connecting";
   const needsCredentialForm = authMethod === "credentials" && isIdle;
@@ -102,32 +109,29 @@ export function CloudConnectionCard({
       ) : connection.status === "connecting" ? (
         <Button variant="outline" className="w-full" disabled>
           <Loader2 className="h-4 w-4 animate-spin" />
-          {authMethod === "oauth" ? "Waiting for Google…" : "Connecting…"}
+          {authMethod === "oauth" ? "Waiting for sign-in…" : "Connecting…"}
         </Button>
       ) : needsCredentialForm ? (
         <form
           className="flex flex-col gap-2"
           onSubmit={(e) => {
             e.preventDefault();
-            onConnect({ email, password });
+            onConnect(fieldValues);
           }}
         >
-          <Input
-            type="email"
-            placeholder="Email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="username"
-          />
-          <Input
-            type="password"
-            placeholder="Password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
+          {credentialFields.map((field) => (
+            <Input
+              key={field.key}
+              type={field.type}
+              placeholder={field.label}
+              required
+              value={fieldValues[field.key] ?? ""}
+              onChange={(e) =>
+                setFieldValues((values) => ({ ...values, [field.key]: e.target.value }))
+              }
+              autoComplete={field.autoComplete}
+            />
+          ))}
           <Button type="submit" variant="outline" className="w-full" disabled={!selected?.available}>
             <LogIn className="h-4 w-4" />
             Connect {displayShortName}
@@ -141,7 +145,7 @@ export function CloudConnectionCard({
           disabled={!selected?.available}
         >
           <Globe className="h-4 w-4" />
-          Sign in with Google
+          Sign in with {displayShortName}
         </Button>
       ) : (
         <Button
@@ -164,6 +168,7 @@ export function CloudConnectionCard({
 
       <FolderPickerDialog
         role={role}
+        providerName={selected?.name ?? displayShortName}
         connectionId={connection.id}
         disabled={connection.status !== "connected"}
         selected={folder}

@@ -10,10 +10,21 @@ export type ProviderRole = "source" | "destination";
 
 /**
  * How a "Connect" click for this provider actually authenticates:
- * "credentials" — an inline email/password form (MEGA); "oauth" — a real
- * Google-style consent popup; "none" — a single click, nothing to enter.
+ * "credentials" — an inline form built from that provider's declared
+ * `credentialFields` (see providers-config.ts); "oauth" — a real consent
+ * popup, built generically for any provider; "none" — a single click,
+ * nothing to enter.
  */
 export type AuthMethod = "credentials" | "oauth" | "none";
+
+/** One input in a "credentials"-auth provider's inline connect form — e.g. MEGA's email+password, or a future S3 provider's access-key fields. */
+export interface CredentialField {
+  /** Key this value is stored under in the `credentials` object sent to POST /connections. */
+  key: string;
+  label: string;
+  type: "text" | "email" | "password";
+  autoComplete?: string;
+}
 
 export interface CloudProviderMeta {
   id: ProviderId;
@@ -54,7 +65,7 @@ export interface SelectedFolder {
   label: string;
 }
 
-/** A node returned by the backend's real folder browser (MEGA/Google Drive). */
+/** A node returned by the backend's real folder browser, for whichever provider is currently connected. */
 export interface RemoteNode {
   id: string;
   name: string;

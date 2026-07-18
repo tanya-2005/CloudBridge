@@ -1,4 +1,5 @@
 import type { Readable } from "node:stream";
+import type { AppError } from "../../common/errors/app-error.js";
 import type { DuplicateStrategy, ProviderType } from "../../types/enums.js";
 import type { RemoteNode } from "../../types/models.js";
 
@@ -31,6 +32,16 @@ export interface SourceProvider {
 
   /** Opens a readable stream for a single file, for downloading. */
   getReadStream(credentials: unknown, fileId: string): Promise<RemoteFileHandle>;
+
+  /**
+   * Maps a raw error from this provider's SDK/API into the app's error
+   * taxonomy (AuthError, TransientProviderError, ...). Optional so a
+   * provider can lean on the engine's generic fallback instead — but
+   * implementing it is how a provider owns its own error handling instead
+   * of the engine needing to import a provider-specific translator (see
+   * migration-engine.ts's `translateError` helper).
+   */
+  translateError?(err: unknown): AppError;
 }
 
 export interface UploadProgress {
@@ -82,4 +93,7 @@ export interface DestinationProvider {
    * `onProgress` as bytes are handed off to the provider, if given.
    */
   uploadFile(params: UploadFileParams): Promise<UploadOutcome>;
+
+  /** Same purpose as SourceProvider.translateError — see there for why it's optional. */
+  translateError?(err: unknown): AppError;
 }

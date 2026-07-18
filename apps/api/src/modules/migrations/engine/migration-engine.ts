@@ -8,7 +8,6 @@ import { connectionsRepository } from "../../connections/connections.repository.
 import { credentialsStore } from "../../connections/credentials.store.js";
 import { destinationProviderRegistry } from "../../providers/destination-provider-registry.js";
 import { providerRegistry } from "../../providers/provider-registry.js";
-import { translateMegaError } from "../../providers/mega/mega.errors.js";
 import type { DestinationProvider, SourceProvider } from "../../providers/provider.interface.js";
 import { migrationsRepository } from "../migrations.repository.js";
 import { runWithConcurrency } from "./concurrency.js";
@@ -65,6 +64,22 @@ export function resolveJobProviders(jobId: string): JobProviders | null {
     destProvider,
     destCredentials: credentialsStore.get(destination.id),
   };
+}
+
+/**
+ * Maps a raw error into the app's error taxonomy by asking the provider
+ * that threw it to translate it, falling back to a generic transient error
+ * if the provider doesn't implement `translateError`. Keeping this here
+ * (rather than the engine importing a specific provider's translator, as
+ * it used to for MEGA) is what lets the engine stay provider-agnostic —
+ * every provider owns its own error mapping.
+ */
+function translateProviderError(
+  provider: { translateError?(err: unknown): AppError },
+  err: unknown
+): AppError {
+  if (err instanceof AppError) return err;
+  return provider.translateError?.(err) ?? new TransientProviderError("Provider request failed — this is usually transient.");
 }
 
 class MigrationEngine {
@@ -270,7 +285,7 @@ class MigrationEngine {
     }
   }
 
-  /** Stage 1: Download from MEGA → Temporary Storage. */
+  /** Stage 1: Download from the source provider → Temporary Storage. */
   private async downloadToTemp(
     jobId: string,
     file: FileTransfer,
@@ -290,11 +305,11 @@ class MigrationEngine {
     try {
       await pipeline(handle.stream, progress, createWriteStream(tempPath));
     } catch (err) {
-      throw translateMegaError(err);
+      throw translateProviderError(sourceProvider, err);
     }
   }
 
-  /** Stage 2: Upload to Google Drive (Stage 3, "Delete temporary file", happens in transferFile's `finally`). */
+  /** Stage 2: Upload to the destination provider (Stage 3, "Delete temporary file", happens in transferFile's `finally`). */
   private async uploadFromTemp(
     jobId: string,
     file: FileTransfer,

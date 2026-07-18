@@ -33,7 +33,7 @@ export const PROVIDERS: ProviderMetaBase[] = [
   {
     id: "GOOGLE_DRIVE",
     name: "Google Drive",
-    roles: ["destination"],
+    roles: ["source", "destination"],
     capabilities: { resumableUpload: true, checksum: "md5" },
   },
   {

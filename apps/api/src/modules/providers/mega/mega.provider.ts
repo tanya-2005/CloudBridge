@@ -1,9 +1,9 @@
 import type { File as MegaFile, Storage } from "megajs";
-import { AuthError, NotFoundError, ValidationError } from "../../../common/errors/app-error.js";
+import { AppError, AuthError, NotFoundError, ValidationError } from "../../../common/errors/app-error.js";
 import type { RemoteNode } from "../../../types/models.js";
 import type { RemoteFileHandle, SourceProvider } from "../provider.interface.js";
 import { getMegaSession, type MegaCredentials } from "./mega.session.js";
-import { runMegaCall } from "./mega.errors.js";
+import { runMegaCall, translateMegaError } from "./mega.errors.js";
 
 function isMegaCredentials(value: unknown): value is MegaCredentials {
   return (
@@ -58,6 +58,10 @@ export class MegaProvider implements SourceProvider {
       filename: file.name ?? fileId,
       sizeBytes: file.size ?? 0,
     };
+  }
+
+  translateError(err: unknown): AppError {
+    return translateMegaError(err);
   }
 
   private requireCredentials(credentials: unknown): MegaCredentials {

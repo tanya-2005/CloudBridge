@@ -68,7 +68,7 @@ export function HomePage() {
 
           <div className="mx-auto flex max-w-4xl flex-col items-center px-4 py-20 text-center sm:px-6 sm:py-28">
             <Badge variant="secondary" className="mb-5">
-              <Sparkles className="h-3 w-3" /> Now migrating MEGA → Google Drive
+              <Sparkles className="h-3 w-3" /> Any source, any destination
             </Badge>
             <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl md:text-6xl">
               Move your files between{" "}
@@ -155,7 +155,7 @@ export function HomePage() {
               Ready to migrate your files?
             </h2>
             <p className="mt-3 max-w-lg text-muted-foreground">
-              Connect MEGA and Google Drive, pick a folder, and let CloudBridge handle the rest.
+              Connect a source and a destination, pick a folder, and let CloudBridge handle the rest.
             </p>
             <Button asChild size="lg" className="mt-8">
               <Link to="/dashboard">
