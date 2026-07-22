@@ -244,7 +244,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
 
     const applyResult = (data: Partial<OAuthResult> | undefined) => {
       if (!data || data.type !== "oauth-result") return;
-      if (data.role && data.role !== role) return; // meant for the other connection slot
+      if (data.role && data.role !== role) return;
 
       settled = true;
       cleanup();

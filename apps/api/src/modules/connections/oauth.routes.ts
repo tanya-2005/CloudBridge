@@ -113,11 +113,19 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
   }
 
   if (req.query.error) {
+    // Google surfaces errors like access_denied or redirect_uri_mismatch
+    // via a query parameter — surface the actual error description to the
+    // user so they can fix it (usually a misconfiguration in their Google
+    // Cloud Console OAuth client settings).
+    const errorDescription =
+      typeof req.query.error_description === "string"
+        ? req.query.error_description
+        : `Google returned: ${String(req.query.error)}`;
     res.redirect(
       resultRedirectUrl(targetOrigin, {
         success: "false",
         role: pending.role,
-        message: "Sign-in was cancelled.",
+        message: errorDescription,
       })
     );
     return;
