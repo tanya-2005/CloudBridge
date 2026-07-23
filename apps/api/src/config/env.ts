@@ -4,7 +4,16 @@ import { z } from "zod";
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().positive().default(4000),
-  CORS_ORIGIN: z.string().default("http://localhost:5173"),
+  /** Comma-separated list of allowed origins, e.g. "http://host-a,http://host-b". */
+  CORS_ORIGIN: z
+    .string()
+    .default("http://localhost:5173")
+    .transform((value) =>
+      value
+        .split(",")
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+    ),
 
   // Google Drive (destination) — two independent auth paths, either or both
   // may be configured. Service account: a single shared server-side

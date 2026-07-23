@@ -13,12 +13,12 @@ import { apiRouter } from "./routes/index.js";
 // every request from the frontend gets silently rejected by CORS while
 // still looking fine to curl/Postman (which don't send an Origin header).
 // In development, accept any localhost/127.0.0.1 origin regardless of
-// port; CORS_ORIGIN stays the strict, single allowed origin in production.
+// port; CORS_ORIGIN stays the strict, explicit allowlist in production.
 const LOCALHOST_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 function isAllowedOrigin(origin: string): boolean {
   if (env.NODE_ENV === "development" && LOCALHOST_ORIGIN.test(origin)) return true;
-  return origin === env.CORS_ORIGIN;
+  return env.CORS_ORIGIN.includes(origin);
 }
 
 export function createApp() {

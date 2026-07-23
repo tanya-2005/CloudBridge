@@ -19,7 +19,9 @@ interface PendingState {
 const pendingStates = new Map<string, PendingState>();
 
 function fallbackOrigin(): string {
-  return env.CORS_ORIGIN;
+  // First entry in the allowlist stands in for "the frontend" when no
+  // Referer header is available to pick the actual calling origin from.
+  return env.CORS_ORIGIN[0] ?? "http://localhost:5173";
 }
 
 function popValidState(state: string | undefined): PendingState | null {
