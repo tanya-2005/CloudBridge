@@ -34,7 +34,10 @@ export const PROVIDERS: ProviderMetaBase[] = [
     id: "GOOGLE_DRIVE",
     name: "Google Drive",
     roles: ["source", "destination"],
-    capabilities: { resumableUpload: true, checksum: "md5" },
+    // The current adapter does a plain (non-resumable) media upload and
+    // never fetches/verifies Drive's md5Checksum — advertise only what's
+    // actually implemented, not what Drive's API is capable of in general.
+    capabilities: { resumableUpload: false, checksum: "none" },
   },
   {
     id: "DROPBOX",

@@ -62,10 +62,12 @@ oauthRouter.get("/:provider/start", (req, res) => {
   const adapter = oauthProviderRegistry.get(slug);
 
   if (!adapter) {
+    console.warn(`OAuth start requested for unknown provider "${slug}".`);
     res.status(404).send(`No OAuth provider is registered for "${slug}".`);
     return;
   }
   if (!adapter.isConfigured()) {
+    console.error(`OAuth start requested for "${slug}" but it isn't configured — see startup logs for details.`);
     res.status(503).send(`OAuth for "${slug}" is not configured on this server.`);
     return;
   }
@@ -93,6 +95,7 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
   const targetOrigin = pending?.origin ?? fallbackOrigin();
 
   if (!pending) {
+    console.warn(`OAuth callback for "${slug}" had no matching pending state — expired, reused, or forged.`);
     res.redirect(
       resultRedirectUrl(targetOrigin, {
         success: "false",
@@ -104,6 +107,7 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
 
   const adapter = oauthProviderRegistry.get(slug);
   if (!adapter) {
+    console.error(`OAuth callback for unknown provider "${slug}".`);
     res.redirect(
       resultRedirectUrl(targetOrigin, {
         success: "false",
@@ -123,6 +127,12 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
       typeof req.query.error_description === "string"
         ? req.query.error_description
         : `Google returned: ${String(req.query.error)}`;
+    console.error(
+      `Google OAuth callback rejected for "${slug}": ${req.query.error} — ${errorDescription}. ` +
+        (req.query.error === "redirect_uri_mismatch"
+          ? "This means GOOGLE_OAUTH_REDIRECT_URI doesn't exactly match an Authorized redirect URI on the OAuth client in Google Cloud Console."
+          : "Check the OAuth client configuration in Google Cloud Console.")
+    );
     res.redirect(
       resultRedirectUrl(targetOrigin, {
         success: "false",
@@ -135,6 +145,7 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
 
   const code = typeof req.query.code === "string" ? req.query.code : undefined;
   if (!code) {
+    console.error(`OAuth callback for "${slug}" had no authorization code and no error — unexpected redirect shape.`);
     res.redirect(
       resultRedirectUrl(targetOrigin, {
         success: "false",

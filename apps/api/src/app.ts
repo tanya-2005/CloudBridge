@@ -24,6 +24,12 @@ function isAllowedOrigin(origin: string): boolean {
 export function createApp() {
   const app = express();
 
+  // No-op today (the VM is hit directly on its own port), but required for
+  // req.ip/req.protocol to be correct once a TLS-terminating reverse proxy
+  // (needed for Google OAuth — see google-drive.oauth-config.ts) sits in
+  // front of this app forwarding X-Forwarded-* headers.
+  app.set("trust proxy", 1);
+
   app.use(helmet());
   app.use(
     cors({

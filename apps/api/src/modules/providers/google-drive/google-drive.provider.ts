@@ -36,6 +36,30 @@ function escapeQueryValue(value: string): string {
 }
 
 /**
+ * `drive.files.list` only ever returns one page (Drive's default/max page
+ * size is 1000, capped at 200 below to keep individual responses light) —
+ * without following `nextPageToken` until it's exhausted, any folder with
+ * more items than one page silently drops the rest. Both listFolders and
+ * listFiles feed the migration planner directly, so a truncated result
+ * here means files that are never migrated with no error surfaced.
+ */
+async function listAllFiles(
+  drive: drive_v3.Drive,
+  params: drive_v3.Params$Resource$Files$List
+): Promise<drive_v3.Schema$File[]> {
+  const files: drive_v3.Schema$File[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const res = await drive.files.list({ ...params, pageToken });
+    files.push(...(res.data.files ?? []));
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+
+  return files;
+}
+
+/**
  * Resolves whichever Drive client this connection actually authenticates
  * with: real per-connection OAuth tokens when present, otherwise the
  * single shared service account configured via environment variables.
@@ -62,13 +86,13 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
     return runDriveCall(async () => {
       const drive = resolveClient(credentials);
       const parentId = folderId ?? getDriveRootFolderId();
-      const res = await drive.files.list({
+      const files = await listAllFiles(drive, {
         q: `'${parentId}' in parents and mimeType = '${FOLDER_MIME_TYPE}' and trashed = false`,
-        fields: "files(id, name, mimeType)",
+        fields: "nextPageToken, files(id, name, mimeType)",
         pageSize: 200,
         orderBy: "name",
       });
-      return (res.data.files ?? []).map(toRemoteNode);
+      return files.map(toRemoteNode);
     });
   }
 
@@ -82,15 +106,13 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
     return runDriveCall(async () => {
       const drive = resolveClient(credentials);
       const parentId = folderId ?? getDriveRootFolderId();
-      const res = await drive.files.list({
+      const files = await listAllFiles(drive, {
         q: `'${parentId}' in parents and mimeType != '${FOLDER_MIME_TYPE}' and trashed = false`,
-        fields: "files(id, name, mimeType, size)",
+        fields: "nextPageToken, files(id, name, mimeType, size)",
         pageSize: 200,
         orderBy: "name",
       });
-      return (res.data.files ?? [])
-        .filter((f) => !f.mimeType?.startsWith(GOOGLE_APPS_MIME_PREFIX))
-        .map(toRemoteNode);
+      return files.filter((f) => !f.mimeType?.startsWith(GOOGLE_APPS_MIME_PREFIX)).map(toRemoteNode);
     });
   }
 

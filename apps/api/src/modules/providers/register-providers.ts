@@ -22,14 +22,23 @@ providerRegistry.register(new MegaProvider());
 // path works: a shared service account, real per-connection OAuth, or
 // both at once — the adapter itself picks whichever a given connection's
 // credentials match.
-if (isGoogleDriveConfigured() || isGoogleOAuthConfigured()) {
+const driveServiceAccountReady = isGoogleDriveConfigured();
+const driveOAuthReady = isGoogleOAuthConfigured();
+
+if (driveServiceAccountReady || driveOAuthReady) {
   const googleDrive = new GoogleDriveProvider();
   providerRegistry.register(googleDrive);
   destinationProviderRegistry.register(googleDrive);
+  console.log(
+    `Google Drive enabled (service account: ${driveServiceAccountReady ? "yes" : "no"}, ` +
+      `OAuth: ${driveOAuthReady ? "yes" : "no"}).`
+  );
 } else {
-  console.warn(
-    "Google Drive not configured — set GOOGLE_SERVICE_ACCOUNT_KEY_FILE/GOOGLE_SERVICE_ACCOUNT_KEY " +
-      "(service account) or GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET (OAuth) to enable it."
+  console.error(
+    "Google Drive is not available — neither auth path is configured:\n" +
+      "  - Service account: set GOOGLE_SERVICE_ACCOUNT_KEY_FILE or GOOGLE_SERVICE_ACCOUNT_KEY.\n" +
+      "  - OAuth: set GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT_URI " +
+      "(see above for details if one of these is partially set)."
   );
 }
 
