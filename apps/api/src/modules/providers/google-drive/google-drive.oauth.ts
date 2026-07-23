@@ -1,4 +1,4 @@
-import { google, type drive_v3 } from "googleapis";
+import { auth as googleAuth, drive as createDriveClient, type drive_v3 } from "@googleapis/drive";
 import { AuthError } from "../../../common/errors/app-error.js";
 import { getGoogleOAuthConfig } from "./google-drive.oauth-config.js";
 
@@ -35,7 +35,7 @@ function requireConfig() {
 /** A fresh, unauthenticated OAuth2 client for building consent URLs / exchanging codes. */
 export function createOAuthClient() {
   const { clientId, clientSecret, redirectUri } = requireConfig();
-  return new google.auth.OAuth2({ clientId, clientSecret, redirectUri });
+  return new googleAuth.OAuth2({ clientId, clientSecret, redirectUri });
 }
 
 export function buildConsentUrl(state: string): string {
@@ -72,7 +72,7 @@ export async function exchangeCodeForTokens(
   }
 
   client.setCredentials(tokens);
-  const drive = google.drive({ version: "v3", auth: client });
+  const drive = createDriveClient({ version: "v3", auth: client });
   const about = await drive.about.get({ fields: "user" });
 
   return {
@@ -104,7 +104,7 @@ export function getOAuthDriveClient(credentials: OAuthCredentials): drive_v3.Dri
   const client = createOAuthClient();
   client.setCredentials({ refresh_token: credentials.refreshToken });
 
-  const drive = google.drive({ version: "v3", auth: client });
+  const drive = createDriveClient({ version: "v3", auth: client });
   driveClientCache.set(credentials.refreshToken, drive);
   return drive;
 }

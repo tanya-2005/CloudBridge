@@ -1,4 +1,4 @@
-import { google, type drive_v3 } from "googleapis";
+import { auth as googleAuth, drive as createDriveClient, type drive_v3 } from "@googleapis/drive";
 import { loadServiceAccountKey } from "./google-drive.config.js";
 
 const SCOPES = ["https://www.googleapis.com/auth/drive"];
@@ -21,11 +21,11 @@ export function getDriveClient(): drive_v3.Drive {
     );
   }
 
-  const auth = new google.auth.GoogleAuth({
+  const auth = new googleAuth.GoogleAuth({
     credentials: { client_email: key.client_email, private_key: key.private_key },
     scopes: SCOPES,
   });
 
-  cachedClient = google.drive({ version: "v3", auth });
+  cachedClient = createDriveClient({ version: "v3", auth });
   return cachedClient;
 }

@@ -1,5 +1,5 @@
 import type { Readable } from "node:stream";
-import type { drive_v3 } from "googleapis";
+import type { drive_v3 } from "@googleapis/drive";
 import type { AppError } from "../../../common/errors/app-error.js";
 import { ValidationError } from "../../../common/errors/app-error.js";
 import type { RemoteNode } from "../../../types/models.js";
