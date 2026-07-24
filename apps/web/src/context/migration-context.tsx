@@ -235,6 +235,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     }
 
     let settled = false;
+    console.log("[OAuth] Popup opened for role:", role);
 
     const cleanup = () => {
       window.removeEventListener("message", handleMessage);
@@ -243,15 +244,24 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     };
 
     const applyResult = (data: Partial<OAuthResult> | undefined) => {
-      if (!data || data.type !== "oauth-result") return;
-      if (data.role && data.role !== role) return;
+      console.log("[OAuth] applyResult called with:", data);
+      if (!data || data.type !== "oauth-result") {
+        console.log("[OAuth] Ignoring invalid payload:", data);
+        return;
+      }
+      if (data.role && data.role !== role) {
+        console.log("[OAuth] Ignoring result for different role:", data.role);
+        return;
+      }
 
       settled = true;
       cleanup();
 
       if (data.success && data.connectionId) {
+        console.log("[OAuth] Setting connection to connected");
         setConn({ id: data.connectionId, status: "connected", account: data.account });
       } else {
+        console.log("[OAuth] Setting connection to error:", data.message);
         setConn({ id: null, status: "error", error: data.message ?? "Sign-in failed." });
       }
     };
@@ -303,9 +313,12 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     const CLOSE_GRACE_MS = 1000;
     let closedAt: number | null = null;
     const closeCheck = window.setInterval(() => {
+      console.log("[OAuth] Poll tick - popup.closed =", popup.closed);
       if (!settled) {
         const stored = readStoredResult();
+        console.log("[OAuth] Stored result:", stored);
         if (stored) {
+          console.log("[OAuth] Found OAuth result in localStorage");
           try {
             localStorage.removeItem(OAUTH_RESULT_STORAGE_KEY);
           } catch {
