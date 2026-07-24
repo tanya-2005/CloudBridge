@@ -16,12 +16,26 @@ const sessions = new Map<string, Storage>();
 
 export async function getMegaSession(credentials: MegaCredentials): Promise<Storage> {
   const key = credentials.email.trim().toLowerCase();
+  console.log(`[MEGA-Trace][getMegaSession] key=${key} cachedSessionExists=${sessions.has(key)}`);
   const cached = sessions.get(key);
-  if (cached && cached.status === "ready") return cached;
+  if (cached && cached.status === "ready") {
+    console.log(`[MEGA-Trace][getMegaSession] using cached session, status=${cached.status}`);
+    return cached;
+  }
 
+  console.log(
+    `[MEGA-Trace][getMegaSession] creating new Storage instance. email=${credentials.email} ` +
+      `passwordLength=${credentials.password.length}`
+  );
   const storage = new Storage({ email: credentials.email, password: credentials.password });
   attachErrorGuard(storage, key);
-  await storage.ready;
+  try {
+    await storage.ready;
+  } catch (err) {
+    console.log("[MEGA-Trace][getMegaSession] storage.ready REJECTED (real megajs error):", err);
+    throw err;
+  }
+  console.log(`[MEGA-Trace][getMegaSession] storage.ready resolved. status=${storage.status}`);
   sessions.set(key, storage);
   return storage;
 }

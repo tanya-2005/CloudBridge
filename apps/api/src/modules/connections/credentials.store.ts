@@ -12,12 +12,33 @@
  */
 const store = new Map<string, unknown>();
 
+/** Never logs a real password value, only its presence/length, so trace logs are safe to paste anywhere. */
+function maskForTrace(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const clone: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  if (typeof clone.password === "string") clone.password = `[REDACTED length=${clone.password.length}]`;
+  return clone;
+}
+
 export const credentialsStore = {
   save(connectionId: string, credentials: unknown): void {
+    console.log(
+      `[MEGA-Trace][credentialsStore.save] connectionId=${connectionId} value=`,
+      maskForTrace(credentials),
+      `store.size(before)=${store.size}`
+    );
     store.set(connectionId, credentials);
+    console.log(
+      `[MEGA-Trace][credentialsStore.save] store.size(after)=${store.size} keys=[${[...store.keys()].join(", ")}]`
+    );
   },
   get(connectionId: string): unknown | undefined {
-    return store.get(connectionId);
+    const value = store.get(connectionId);
+    console.log(
+      `[MEGA-Trace][credentialsStore.get] connectionId=${connectionId} found=${value !== undefined} ` +
+        `store.size=${store.size} keys=[${[...store.keys()].join(", ")}]`
+    );
+    return value;
   },
   delete(connectionId: string): void {
     store.delete(connectionId);

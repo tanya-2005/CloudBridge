@@ -7,6 +7,18 @@ import type { UploadQuery } from "./connections.schema.js";
 /** Progress callbacks fire per network chunk — log at most this often per upload. */
 const PROGRESS_LOG_INTERVAL_MS = 500;
 
+/** Never logs a real password value, only its presence/length, so trace logs are safe to paste anywhere. */
+function maskForTrace(body: unknown): unknown {
+  if (!body || typeof body !== "object") return body;
+  const clone: Record<string, unknown> = { ...(body as Record<string, unknown>) };
+  if (clone.credentials && typeof clone.credentials === "object") {
+    const creds: Record<string, unknown> = { ...(clone.credentials as Record<string, unknown>) };
+    if (typeof creds.password === "string") creds.password = `[REDACTED length=${creds.password.length}]`;
+    clone.credentials = creds;
+  }
+  return clone;
+}
+
 export class ConnectionsController {
   constructor(private readonly service: ConnectionsService) {}
 
@@ -19,6 +31,7 @@ export class ConnectionsController {
   };
 
   create = (req: Request, res: Response): void => {
+    console.log("[MEGA-Trace][POST /connections] body:", maskForTrace(req.body));
     sendSuccess(res, this.service.create(req.body), 201);
   };
 

@@ -26,6 +26,7 @@ export class ConnectionsService {
 
   create(input: CreateConnectionInput): CloudConnection {
     const connection = this.repository.create({ provider: input.provider, label: input.label });
+    console.log("[MEGA-Trace][ConnectionsService.create] persisted connection record:", connection);
     if (input.credentials !== undefined) {
       credentialsStore.save(connection.id, input.credentials);
     }

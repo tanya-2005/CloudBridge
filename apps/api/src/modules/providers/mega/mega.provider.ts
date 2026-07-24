@@ -5,6 +5,14 @@ import type { RemoteFileHandle, SourceProvider } from "../provider.interface.js"
 import { getMegaSession, type MegaCredentials } from "./mega.session.js";
 import { runMegaCall, translateMegaError } from "./mega.errors.js";
 
+/** Never logs a real password value, only its presence/length, so trace logs are safe to paste anywhere. */
+function maskForTrace(value: unknown): unknown {
+  if (!value || typeof value !== "object") return value;
+  const clone: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  if (typeof clone.password === "string") clone.password = `[REDACTED length=${clone.password.length}]`;
+  return clone;
+}
+
 function isMegaCredentials(value: unknown): value is MegaCredentials {
   return (
     !!value &&
@@ -65,7 +73,9 @@ export class MegaProvider implements SourceProvider {
   }
 
   private requireCredentials(credentials: unknown): MegaCredentials {
+    console.log("[MEGA-Trace][MegaProvider.requireCredentials] raw credentials:", maskForTrace(credentials));
     if (!isMegaCredentials(credentials)) {
+      console.log("[MEGA-Trace][MegaProvider.requireCredentials] FAILED isMegaCredentials() shape check.");
       throw new ValidationError("MEGA connections require { email, password } credentials.");
     }
     return credentials;
@@ -73,9 +83,16 @@ export class MegaProvider implements SourceProvider {
 
   private async authenticate(credentials: unknown): Promise<Storage> {
     const creds = this.requireCredentials(credentials);
+    console.log(
+      "[MEGA-Trace][MegaProvider.authenticate] calling getMegaSession with email:",
+      creds.email,
+      "passwordLength:",
+      creds.password.length
+    );
     try {
       return await getMegaSession(creds);
-    } catch {
+    } catch (err) {
+      console.log("[MEGA-Trace][MegaProvider.authenticate] getMegaSession THREW (real error, not yet masked):", err);
       throw new AuthError("MEGA login failed — check the email and password.");
     }
   }
