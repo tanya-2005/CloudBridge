@@ -254,7 +254,9 @@ oauthRouter.get("/result/:state", (req, res) => {
   }
 
   console.log(`[OAuth][ResultPoll] pid=${process.pid} state=${state} returning definitive result:`, outcome);
-  completedResults.delete(state);
+  // TEMPORARY DIAGNOSTIC — delete-on-read disabled to test whether concurrent
+  // /result/:state requests for the same state are racing (see conversation).
+  // completedResults.delete(state);
   sendSuccess(res, {
     pending: false,
     success: outcome.success,
