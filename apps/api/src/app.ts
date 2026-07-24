@@ -30,6 +30,14 @@ export function createApp() {
   // front of this app forwarding X-Forwarded-* headers.
   app.set("trust proxy", 1);
 
+  // Express has no per-route way to opt a single response out of its
+  // default weak-ETag generation (it's an app-level setting only) — needed
+  // so GET /connections/oauth/result/:state can't have a conditional GET
+  // satisfied with a stale cached body via 304 for a URL whose response
+  // legitimately changes between polls. Nothing else in this app relies on
+  // client-side ETag caching, so disabling it globally is safe.
+  app.set("etag", false);
+
   app.use(helmet());
   app.use(
     cors({

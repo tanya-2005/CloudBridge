@@ -241,6 +241,18 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
  * the popup closes.
  */
 oauthRouter.get("/result/:state", (req, res) => {
+  // This is a live poll: the exact same URL's response legitimately flips
+  // from pending to completed between one request and the next. Without
+  // these headers, Express's default ETag plus no explicit cache directive
+  // makes the response look like a normal revalidatable resource to the
+  // browser and any proxy in front of this API (Vercel's rewrite included)
+  // — letting a conditional GET be satisfied with a cached/304 response
+  // even after the backend has moved on. Set before any branching below so
+  // every response from this route — pending or completed — is covered.
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+
   const { state } = req.params;
   logCompletedResultsState("Map.get.BEFORE", state);
   const outcome = completedResults.get(state);
