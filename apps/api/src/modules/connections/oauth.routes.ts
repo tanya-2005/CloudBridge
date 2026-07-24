@@ -142,12 +142,9 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
       console.log(`[OAuth][RecordOutcome] pid=${process.pid} no state — nothing to store. outcome=`, outcome);
       return;
     }
+    console.log("[OAuth][Map.set][BEFORE]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
     completedResults.set(state, { ...outcome, createdAt: Date.now() });
-    console.log(
-      `[OAuth][RecordOutcome] pid=${process.pid} map.set(state=${state}) outcome=`,
-      outcome,
-      `completedResults.size=${completedResults.size} keys=[${[...completedResults.keys()].join(", ")}]`
-    );
+    console.log("[OAuth][Map.set][AFTER]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
   };
 
   const adapter = oauthProviderRegistry.get(slug);
@@ -233,11 +230,9 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
  */
 oauthRouter.get("/result/:state", (req, res) => {
   const { state } = req.params;
+  console.log("[OAuth][Map.get][BEFORE]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
   const outcome = completedResults.get(state);
-  console.log(
-    `[OAuth][ResultPoll] pid=${process.pid} GET /result/${state} -> map.get -> ${outcome ? "FOUND" : "MISS"}. ` +
-      `completedResults.size=${completedResults.size} keys=[${[...completedResults.keys()].join(", ")}]`
-  );
+  console.log("[OAuth][Map.get][AFTER]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
 
   if (!outcome || isExpired(outcome.createdAt)) {
     if (outcome) console.log(`[OAuth][ResultPoll] pid=${process.pid} state=${state} found but expired.`);
