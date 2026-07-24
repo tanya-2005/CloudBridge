@@ -52,11 +52,21 @@ function pruneExpired(): void {
 }
 
 function popValidState(state: string | undefined): PendingState | null {
-  if (!state) return null;
+  if (!state) {
+    console.log(`[OAuth][PopState] pid=${process.pid} no state provided on callback request.`);
+    return null;
+  }
   const pending = pendingStates.get(state);
+  console.log(
+    `[OAuth][PopState] pid=${process.pid} map.get(state=${state}) -> ${pending ? "found" : "MISS"}. ` +
+      `pendingStates.size=${pendingStates.size} keys=[${[...pendingStates.keys()].join(", ")}]`
+  );
   pendingStates.delete(state); // single-use regardless of outcome
   if (!pending) return null;
-  if (isExpired(pending.createdAt)) return null;
+  if (isExpired(pending.createdAt)) {
+    console.log(`[OAuth][PopState] pid=${process.pid} state=${state} found but expired (createdAt=${pending.createdAt}).`);
+    return null;
+  }
   return pending;
 }
 
@@ -107,6 +117,10 @@ oauthRouter.get("/:provider/start", (req, res) => {
   // directly (e.g. manual testing) without that query param.
   const state = typeof req.query.state === "string" && req.query.state.length > 0 ? req.query.state : randomUUID();
   pendingStates.set(state, { role, slug, createdAt: Date.now() });
+  console.log(
+    `[OAuth][Start] pid=${process.pid} slug=${slug} role=${role} state=${state} ` +
+      `clientSupplied=${req.query.state === state} pendingStates.size=${pendingStates.size}`
+  );
 
   res.redirect(adapter.buildConsentUrl(state));
 });
@@ -114,6 +128,7 @@ oauthRouter.get("/:provider/start", (req, res) => {
 oauthRouter.get("/:provider/callback", async (req, res) => {
   const slug = req.params.provider as string;
   const state = typeof req.query.state === "string" ? req.query.state : undefined;
+  console.log(`[OAuth][Callback] pid=${process.pid} EXECUTING callback for slug=${slug} state=${state}`);
   const pending = popValidState(state);
 
   if (!pending) {
@@ -123,7 +138,16 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
   }
 
   const recordOutcome = (outcome: Omit<OAuthOutcome, "createdAt">) => {
-    if (state) completedResults.set(state, { ...outcome, createdAt: Date.now() });
+    if (!state) {
+      console.log(`[OAuth][RecordOutcome] pid=${process.pid} no state — nothing to store. outcome=`, outcome);
+      return;
+    }
+    completedResults.set(state, { ...outcome, createdAt: Date.now() });
+    console.log(
+      `[OAuth][RecordOutcome] pid=${process.pid} map.set(state=${state}) outcome=`,
+      outcome,
+      `completedResults.size=${completedResults.size} keys=[${[...completedResults.keys()].join(", ")}]`
+    );
   };
 
   const adapter = oauthProviderRegistry.get(slug);
@@ -210,13 +234,19 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
 oauthRouter.get("/result/:state", (req, res) => {
   const { state } = req.params;
   const outcome = completedResults.get(state);
+  console.log(
+    `[OAuth][ResultPoll] pid=${process.pid} GET /result/${state} -> map.get -> ${outcome ? "FOUND" : "MISS"}. ` +
+      `completedResults.size=${completedResults.size} keys=[${[...completedResults.keys()].join(", ")}]`
+  );
 
   if (!outcome || isExpired(outcome.createdAt)) {
+    if (outcome) console.log(`[OAuth][ResultPoll] pid=${process.pid} state=${state} found but expired.`);
     completedResults.delete(state);
     sendSuccess(res, { pending: true });
     return;
   }
 
+  console.log(`[OAuth][ResultPoll] pid=${process.pid} state=${state} returning definitive result:`, outcome);
   completedResults.delete(state);
   sendSuccess(res, {
     pending: false,

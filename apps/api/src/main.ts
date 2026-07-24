@@ -4,7 +4,10 @@ import { env } from "./config/env.js";
 const app = createApp();
 
 const server = app.listen(env.PORT, "0.0.0.0", () => {
-  console.log(`API listening on http://localhost:${env.PORT} (${env.NODE_ENV})`);
+  console.log(
+    `API listening on http://localhost:${env.PORT} (${env.NODE_ENV}) pid=${process.pid} ` +
+      `NODE_APP_INSTANCE=${process.env.NODE_APP_INSTANCE ?? "unset"}`
+  );
 });
 
 function shutdown(signal: string) {
