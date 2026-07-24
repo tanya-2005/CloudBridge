@@ -41,12 +41,25 @@ function isExpired(createdAt: number): boolean {
   return Date.now() - createdAt > STATE_TTL_MS;
 }
 
-/** Uniform snapshot logger — same four fields at every requested checkpoint, so the four log points can be diffed directly against each other. */
+/** Uniform snapshot logger — same fields at every requested checkpoint, so the log points can be diffed directly against each other. */
 function logCompletedResultsState(point: string, state: string | undefined): void {
   console.log(`[OAuth][${point}]`, {
     state,
     completedResultsSize: completedResults.size,
     completedResultsGet: state ? completedResults.get(state) : undefined,
+    // JSON-quoted so any invisible whitespace/character difference between
+    // the queried state and a stored key is visible in the log output.
+    completedResultsKeys: [...completedResults.keys()].map((k) => JSON.stringify(k)),
+    pid: process.pid,
+  });
+}
+
+/** Byte-exact log of one state value, for comparing across /start, the callback's Map.set, and /result — same shape at all three call sites. */
+function logStateValue(checkpoint: string, state: string | undefined): void {
+  console.log(`[OAuth][StateTrace][${checkpoint}]`, {
+    state,
+    json: JSON.stringify(state),
+    length: state?.length,
     pid: process.pid,
   });
 }
@@ -132,6 +145,7 @@ oauthRouter.get("/:provider/start", (req, res) => {
       `clientSupplied=${req.query.state === state} pendingStates.size=${pendingStates.size}`
   );
   logCompletedResultsState("StateCreated", state);
+  logStateValue("START", state);
 
   res.redirect(adapter.buildConsentUrl(state));
 });
@@ -157,6 +171,7 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
     logCompletedResultsState("Map.set.BEFORE", state);
     completedResults.set(state, { ...outcome, createdAt: Date.now() });
     logCompletedResultsState("Map.set.AFTER", state);
+    logStateValue("CALLBACK-SET", state);
   };
 
   const adapter = oauthProviderRegistry.get(slug);
@@ -254,6 +269,7 @@ oauthRouter.get("/result/:state", (req, res) => {
   res.setHeader("Expires", "0");
 
   const { state } = req.params;
+  logStateValue("RESULT", state);
   logCompletedResultsState("Map.get.BEFORE", state);
   const outcome = completedResults.get(state);
   logCompletedResultsState("Map.get.AFTER", state);
