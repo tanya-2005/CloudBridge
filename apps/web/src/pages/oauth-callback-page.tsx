@@ -76,18 +76,21 @@ export function OAuthCallbackPage() {
     // unmount would call cleanup (cancelling the timer). By omitting
     // cleanup the first timer survives, and the useRef guard prevents
     // the second mount from duplicating the work.
-    console.log("[OAuth][Callback] Scheduling window.close() in 1000ms.");
-    setTimeout(() => {
-      console.log("[OAuth][Callback] Closing window now (1000ms timer).");
-      window.close();
-    }, 1000);
+    //
+    // TEMPORARILY DISABLED FOR DEBUGGING — popup is left open intentionally
+    // so its console/Application-storage can be inspected directly. Restore
+    // both setTimeout calls below once the handoff issue is confirmed fixed.
+    console.log("[OAuth][Callback] Auto-close is temporarily DISABLED for debugging — popup will stay open.");
+    // setTimeout(() => {
+    //   console.log("[OAuth][Callback] Closing window now (1000ms timer).");
+    //   window.close();
+    // }, 1000);
 
     // Safety fallback — force-close after 5s regardless.
-    console.log("[OAuth][Callback] Scheduling fallback window.close() in 5000ms.");
-    setTimeout(() => {
-      console.log("[OAuth][Callback] Closing window now (5000ms fallback timer).");
-      window.close();
-    }, 5000);
+    // setTimeout(() => {
+    //   console.log("[OAuth][Callback] Closing window now (5000ms fallback timer).");
+    //   window.close();
+    // }, 5000);
   }, []);
 
   return (
