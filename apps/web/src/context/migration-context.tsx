@@ -214,6 +214,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     setConn({ id: null, status: "connecting" });
 
     try {
+      console.log("[OAuth][Storage] Clearing stale result before opening popup, key:", OAUTH_RESULT_STORAGE_KEY);
       localStorage.removeItem(OAUTH_RESULT_STORAGE_KEY);
     } catch {
       // Storage unavailable — the popup's postMessage channel still works.
@@ -238,30 +239,42 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     console.log("[OAuth] Popup opened for role:", role);
 
     const cleanup = () => {
+      console.log("[OAuth] cleanup() called — removing listeners and clearing poll interval.");
       window.removeEventListener("message", handleMessage);
       window.removeEventListener("storage", handleStorage);
       clearInterval(closeCheck);
     };
 
     const applyResult = (data: Partial<OAuthResult> | undefined) => {
-      console.log("[OAuth] applyResult called with:", data);
+      console.log("[OAuth][ApplyResult] applyOAuthResult() starting. providerId:", providerId, "role:", role);
+      console.log("[OAuth][ApplyResult] Raw data:", data);
       if (!data || data.type !== "oauth-result") {
-        console.log("[OAuth] Ignoring invalid payload:", data);
+        console.log("[OAuth][ApplyResult] Ignoring invalid payload:", data);
         return;
       }
       if (data.role && data.role !== role) {
-        console.log("[OAuth] Ignoring result for different role:", data.role);
+        console.log("[OAuth][ApplyResult] Ignoring result for different role. expected:", role, "got:", data.role);
         return;
       }
+
+      console.log(
+        "[OAuth][ApplyResult] Accepted result — role:", data.role,
+        "connectionId:", data.connectionId,
+        "account:", data.account,
+        "providerId:", providerId
+      );
 
       settled = true;
       cleanup();
 
       if (data.success && data.connectionId) {
-        console.log("[OAuth] Setting connection to connected");
+        console.log("[OAuth][ApplyResult] React state change: setConn -> connected", {
+          id: data.connectionId,
+          account: data.account,
+        });
         setConn({ id: data.connectionId, status: "connected", account: data.account });
       } else {
-        console.log("[OAuth] Setting connection to error:", data.message);
+        console.log("[OAuth][ApplyResult] React state change: setConn -> error", data.message);
         setConn({ id: null, status: "error", error: data.message ?? "Sign-in failed." });
       }
     };
@@ -277,10 +290,15 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     // `window.opener` itself can't be relied on at all here — see
     // oauth.routes.ts for why.
     const readStoredResult = (): Partial<OAuthResult> | undefined => {
+      console.log("[OAuth][Storage] readStoredResult() — window.location.origin:", window.location.origin);
       try {
         const raw = localStorage.getItem(OAUTH_RESULT_STORAGE_KEY);
-        return raw ? (JSON.parse(raw) as Partial<OAuthResult>) : undefined;
-      } catch {
+        console.log("[OAuth][Storage] localStorage.getItem raw value:", raw);
+        const parsed = raw ? (JSON.parse(raw) as Partial<OAuthResult>) : undefined;
+        console.log("[OAuth][Storage] parsed value:", parsed);
+        return parsed;
+      } catch (err) {
+        console.log("[OAuth][Storage] readStoredResult() threw — treating as no result:", err);
         return undefined;
       }
     };
@@ -320,6 +338,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
         if (stored) {
           console.log("[OAuth] Found OAuth result in localStorage");
           try {
+            console.log("[OAuth][Storage] Clearing consumed result, key:", OAUTH_RESULT_STORAGE_KEY);
             localStorage.removeItem(OAUTH_RESULT_STORAGE_KEY);
           } catch {
             // Best-effort cleanup only.
@@ -331,6 +350,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
       if (!popup.closed) return;
       if (closedAt === null) closedAt = Date.now();
       if (Date.now() - closedAt < CLOSE_GRACE_MS) return;
+      console.log("[OAuth] Polling stops — grace period elapsed after popup closed with no result. settled =", settled);
       clearInterval(closeCheck);
       if (!settled) {
         cleanup();

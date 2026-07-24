@@ -20,10 +20,16 @@ export function OAuthCallbackPage() {
   const delivered = useRef(false);
 
   useLayoutEffect(() => {
+    console.log("[OAuth][Callback] Effect fired. delivered.current =", delivered.current);
     if (delivered.current) return;
     delivered.current = true;
 
+    console.log("[OAuth][Callback] Callback page loaded.");
+    console.log("[OAuth][Callback] Current URL:", window.location.href);
+    console.log("[OAuth][Callback] window.location.origin:", window.location.origin);
+
     const searchParams = new URLSearchParams(window.location.search);
+    console.log("[OAuth][Callback] Current search params:", searchParams.toString());
 
     const result: OAuthResult = {
       type: "oauth-result",
@@ -33,6 +39,7 @@ export function OAuthCallbackPage() {
       connectionId: searchParams.get("connectionId") ?? undefined,
       account: searchParams.get("account") ?? undefined,
     };
+    console.log("[OAuth][Callback] OAuth result object:", result);
 
     // Two delivery channels, both best-effort:
     //
@@ -42,14 +49,20 @@ export function OAuthCallbackPage() {
     // 2. postMessage — fast direct delivery when window.opener survives
     //    the popup's trip through Google's consent domain.
     try {
+      console.log("[OAuth][Callback] Writing localStorage, key:", OAUTH_RESULT_STORAGE_KEY, "value:", result);
       localStorage.setItem(OAUTH_RESULT_STORAGE_KEY, JSON.stringify(result));
-    } catch {
+      const readBack = localStorage.getItem(OAUTH_RESULT_STORAGE_KEY);
+      console.log("[OAuth][Callback] Immediately read localStorage back:", readBack);
+    } catch (err) {
+      console.log("[OAuth][Callback] localStorage write failed:", err);
       // Storage unavailable — postMessage is still viable.
     }
 
     try {
+      console.log("[OAuth][Callback] Sending postMessage to window.opener. opener present:", !!window.opener);
       window.opener?.postMessage(result, window.location.origin);
-    } catch {
+    } catch (err) {
+      console.log("[OAuth][Callback] postMessage failed:", err);
       // Opener reference gone — localStorage poll will cover us.
     }
 
@@ -58,10 +71,18 @@ export function OAuthCallbackPage() {
     // unmount would call cleanup (cancelling the timer). By omitting
     // cleanup the first timer survives, and the useRef guard prevents
     // the second mount from duplicating the work.
-    setTimeout(() => window.close(), 1000);
+    console.log("[OAuth][Callback] Scheduling window.close() in 1000ms.");
+    setTimeout(() => {
+      console.log("[OAuth][Callback] Closing window now (1000ms timer).");
+      window.close();
+    }, 1000);
 
     // Safety fallback — force-close after 5s regardless.
-    setTimeout(() => window.close(), 5000);
+    console.log("[OAuth][Callback] Scheduling fallback window.close() in 5000ms.");
+    setTimeout(() => {
+      console.log("[OAuth][Callback] Closing window now (5000ms fallback timer).");
+      window.close();
+    }, 5000);
   }, []);
 
   return (
