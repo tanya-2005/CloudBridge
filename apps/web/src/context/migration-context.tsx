@@ -13,7 +13,6 @@ import {
   mapLogEntry,
   toBackendDuplicateStrategy,
 } from "@/lib/api-mappers";
-import { OAUTH_RESULT_STORAGE_KEY, type OAuthResult } from "@/lib/oauth-result";
 import { getProviderDisplay } from "@/lib/providers-config";
 import type {
   ActivityLogEntry,
@@ -213,15 +212,20 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
 
     setConn({ id: null, status: "connecting" });
 
-    try {
-      console.log("[OAuth][Storage] Clearing stale result before opening popup, key:", OAUTH_RESULT_STORAGE_KEY);
-      localStorage.removeItem(OAUTH_RESULT_STORAGE_KEY);
-    } catch {
-      // Storage unavailable — the popup's postMessage channel still works.
-    }
+    // Generated here (not by the backend) so the dashboard has something
+    // to poll /connections/oauth/result/:state with as soon as the popup
+    // opens — the backend just uses whatever it's given as the OAuth
+    // `state` value, and echoes results back keyed by it. This is the
+    // completion channel: it's a plain HTTP poll against the backend we
+    // already talk to for everything else, so it has no dependency on
+    // window.opener or the popup ending up strictly same-origin with this
+    // tab, unlike postMessage/localStorage (both of which broke in
+    // practice once the popup went through a real cross-origin redirect
+    // chain to the provider's consent screen and back).
+    const state = crypto.randomUUID();
 
     const popup = window.open(
-      `${API_BASE}/connections/oauth/${oauthSlug}/start?role=${role}`,
+      `${API_BASE}/connections/oauth/${oauthSlug}/start?role=${role}&state=${state}`,
       `cloudbridge-oauth-${role}`,
       "width=520,height=650"
     );
@@ -236,127 +240,55 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     }
 
     let settled = false;
-    console.log("[OAuth] Popup opened for role:", role);
 
-    const cleanup = () => {
-      console.log("[OAuth] cleanup() called — removing listeners and clearing poll interval.");
-      window.removeEventListener("message", handleMessage);
-      window.removeEventListener("storage", handleStorage);
-      clearInterval(closeCheck);
-    };
-
-    const applyResult = (data: Partial<OAuthResult> | undefined) => {
-      console.log("[OAuth][ApplyResult] applyOAuthResult() starting. providerId:", providerId, "role:", role);
-      console.log("[OAuth][ApplyResult] Raw data:", data);
-      if (!data || data.type !== "oauth-result") {
-        console.log("[OAuth][ApplyResult] Ignoring invalid payload:", data);
-        return;
-      }
-      if (data.role && data.role !== role) {
-        console.log("[OAuth][ApplyResult] Ignoring result for different role. expected:", role, "got:", data.role);
-        return;
-      }
-
-      console.log(
-        "[OAuth][ApplyResult] Accepted result — role:", data.role,
-        "connectionId:", data.connectionId,
-        "account:", data.account,
-        "providerId:", providerId
-      );
+    const applyResult = (data: {
+      success: boolean;
+      role?: "source" | "destination";
+      connectionId?: string;
+      account?: string;
+      message?: string;
+    }) => {
+      if (data.role && data.role !== role) return;
 
       settled = true;
-      cleanup();
+      clearInterval(poll);
 
       if (data.success && data.connectionId) {
-        console.log("[OAuth][ApplyResult] React state change: setConn -> connected", {
-          id: data.connectionId,
-          account: data.account,
-        });
         setConn({ id: data.connectionId, status: "connected", account: data.account });
       } else {
-        console.log("[OAuth][ApplyResult] React state change: setConn -> error", data.message);
         setConn({ id: null, status: "error", error: data.message ?? "Sign-in failed." });
       }
     };
 
-    // Primary channel: postMessage from the callback page, same-origin to
-    // us (see oauth-callback-page.tsx). Fallback: `localStorage`, checked
-    // both via the `storage` event and by polling — the popup calls
-    // window.close() ~300ms after writing the result, and in practice the
-    // `storage` event doesn't reliably reach this window before that
-    // popup's process tears down (likely tied to the process split COOP
-    // forces on the cross-origin hop through the provider's real consent
-    // domain), so polling is the channel that's actually dependable.
-    // `window.opener` itself can't be relied on at all here — see
-    // oauth.routes.ts for why.
-    const readStoredResult = (): Partial<OAuthResult> | undefined => {
-      console.log("[OAuth][Storage] readStoredResult() — window.location.origin:", window.location.origin);
-      try {
-        const raw = localStorage.getItem(OAUTH_RESULT_STORAGE_KEY);
-        console.log("[OAuth][Storage] localStorage.getItem raw value:", raw);
-        const parsed = raw ? (JSON.parse(raw) as Partial<OAuthResult>) : undefined;
-        console.log("[OAuth][Storage] parsed value:", parsed);
-        return parsed;
-      } catch (err) {
-        console.log("[OAuth][Storage] readStoredResult() threw — treating as no result:", err);
-        return undefined;
-      }
-    };
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      applyResult(event.data as Partial<OAuthResult> | undefined);
-    };
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key !== OAUTH_RESULT_STORAGE_KEY || !event.newValue) return;
-      try {
-        applyResult(JSON.parse(event.newValue) as Partial<OAuthResult>);
-      } catch {
-        // Malformed payload — ignore.
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    window.addEventListener("storage", handleStorage);
-
-    // Polls localStorage and watches for the popup closing. Runs every
-    // 250ms until settled: applies a freshly-written result the instant
-    // it's polled. The popup's own window.close() call can win a race
-    // against its localStorage.setItem actually propagating to this
-    // (different) process — Chromium's storage sync between renderer
-    // processes isn't instantaneous — so once the popup is observed
-    // closed with nothing settled yet, we keep polling for a short grace
-    // window before finally falling back to idle (the "user dismissed it
-    // manually" case).
-    const CLOSE_GRACE_MS = 1000;
+    // Polls the backend every second for this state token's result, and
+    // watches for the popup closing. Runs until settled: a definitive
+    // result (success or failure) always wins over the popup-closed check.
+    // Once the popup is observed closed with nothing settled yet, keep
+    // polling for a short grace window (the callback's own request to the
+    // backend may still be in flight) before finally falling back to idle
+    // (the "user dismissed it manually" case).
+    const CLOSE_GRACE_MS = 2000;
     let closedAt: number | null = null;
-    const closeCheck = window.setInterval(() => {
-      console.log("[OAuth] Poll tick - popup.closed =", popup.closed);
-      if (!settled) {
-        const stored = readStoredResult();
-        console.log("[OAuth] Stored result:", stored);
-        if (stored) {
-          console.log("[OAuth] Found OAuth result in localStorage");
-          try {
-            console.log("[OAuth][Storage] Clearing consumed result, key:", OAUTH_RESULT_STORAGE_KEY);
-            localStorage.removeItem(OAUTH_RESULT_STORAGE_KEY);
-          } catch {
-            // Best-effort cleanup only.
-          }
-          applyResult(stored);
-          return;
-        }
+    const poll = window.setInterval(() => {
+      api
+        .pollOAuthResult(state)
+        .then((result) => {
+          if (settled) return;
+          if (!result.pending) applyResult(result);
+        })
+        .catch((err) => {
+          console.error("Failed to poll OAuth result:", err);
+        });
+
+      if (settled || !popup.closed) return;
+      if (closedAt === null) {
+        closedAt = Date.now();
+        return;
       }
-      if (!popup.closed) return;
-      if (closedAt === null) closedAt = Date.now();
       if (Date.now() - closedAt < CLOSE_GRACE_MS) return;
-      console.log("[OAuth] Polling stops — grace period elapsed after popup closed with no result. settled =", settled);
-      clearInterval(closeCheck);
-      if (!settled) {
-        cleanup();
-        setConn(idleConnection());
-      }
-    }, 250);
+      clearInterval(poll);
+      if (!settled) setConn(idleConnection());
+    }, 1000);
   }, [sourceProviderId, destProviderId, getProviderMeta]);
 
   const disconnect = useCallback(async (role: ProviderRole) => {

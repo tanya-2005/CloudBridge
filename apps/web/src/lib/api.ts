@@ -163,6 +163,25 @@ export interface ResolveConflictInput {
   newName?: string;
 }
 
+/**
+ * Result of an OAuth popup flow, polled from the backend by state token
+ * rather than delivered via window.opener/postMessage or localStorage —
+ * both of those require the popup and dashboard to end up strictly
+ * same-origin after a redirect chain through the provider's own consent
+ * domain, which isn't reliably guaranteed. A plain HTTP poll has no such
+ * requirement.
+ */
+export type OAuthPollResult =
+  | { pending: true }
+  | {
+      pending: false;
+      success: boolean;
+      role?: "source" | "destination";
+      connectionId?: string;
+      account?: string;
+      message?: string;
+    };
+
 // ---- Client -----------------------------------------------------------
 
 export const api = {
@@ -194,4 +213,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  pollOAuthResult: (state: string) =>
+    request<OAuthPollResult>(`/connections/oauth/result/${state}`),
 };
