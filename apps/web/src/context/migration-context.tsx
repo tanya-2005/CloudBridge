@@ -246,6 +246,17 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", handleFocusRegained);
     };
 
+    // Shared teardown for both ways this ever ends: a definitive backend
+    // result, or the overall timeout below. The popup closing is not one of
+    // these — it's not a reliable signal that the flow is done, only the
+    // backend's own recorded result (or giving up after OVERALL_TIMEOUT_MS)
+    // is.
+    const finish = () => {
+      clearInterval(poll);
+      clearTimeout(timeoutId);
+      removeFocusListeners();
+    };
+
     const applyResult = (data: {
       success: boolean;
       role?: "source" | "destination";
@@ -256,8 +267,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
       if (data.role && data.role !== role) return;
 
       settled = true;
-      clearInterval(poll);
-      removeFocusListeners();
+      finish();
 
       if (data.success && data.connectionId) {
         setConn({ id: data.connectionId, status: "connected", account: data.account });
@@ -298,28 +308,22 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     document.addEventListener("visibilitychange", handleFocusRegained);
     window.addEventListener("focus", handleFocusRegained);
 
-    // Polls the backend every second for this state token's result, and
-    // watches for the popup closing. Runs until settled: a definitive
-    // result (success or failure) always wins over the popup-closed check.
-    // Once the popup is observed closed with nothing settled yet, keep
-    // polling for a short grace window (the callback's own request to the
-    // backend may still be in flight) before finally falling back to idle
-    // (the "user dismissed it manually" case).
-    const CLOSE_GRACE_MS = 2000;
-    let closedAt: number | null = null;
+    // Polls the backend every second for this state token's result. The
+    // popup closing is deliberately NOT a stop condition here — only a
+    // definitive backend result, or the overall timeout below, ends this.
     const poll = window.setInterval(() => {
       pollNow("interval tick");
-
-      if (settled || !popup.closed) return;
-      if (closedAt === null) {
-        closedAt = Date.now();
-        return;
-      }
-      if (Date.now() - closedAt < CLOSE_GRACE_MS) return;
-      clearInterval(poll);
-      removeFocusListeners();
-      if (!settled) setConn(idleConnection());
     }, 1000);
+
+    // Backstop for a flow that never completes (user abandons it, closes
+    // the popup without finishing, etc.) — without this, polling would run
+    // forever if the backend never records a result for this state.
+    const OVERALL_TIMEOUT_MS = 60_000;
+    const timeoutId = window.setTimeout(() => {
+      if (settled) return;
+      finish();
+      setConn({ id: null, status: "error", error: "Sign-in timed out — please try again." });
+    }, OVERALL_TIMEOUT_MS);
   }, [sourceProviderId, destProviderId, getProviderMeta]);
 
   const disconnect = useCallback(async (role: ProviderRole) => {
