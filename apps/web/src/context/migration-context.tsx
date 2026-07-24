@@ -241,6 +241,11 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
 
     let settled = false;
 
+    const removeFocusListeners = () => {
+      document.removeEventListener("visibilitychange", handleFocusRegained);
+      window.removeEventListener("focus", handleFocusRegained);
+    };
+
     const applyResult = (data: {
       success: boolean;
       role?: "source" | "destination";
@@ -252,6 +257,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
 
       settled = true;
       clearInterval(poll);
+      removeFocusListeners();
 
       if (data.success && data.connectionId) {
         setConn({ id: data.connectionId, status: "connected", account: data.account });
@@ -259,6 +265,38 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
         setConn({ id: null, status: "error", error: data.message ?? "Sign-in failed." });
       }
     };
+
+    // The dashboard tab is backgrounded for the whole time the user is on
+    // the popup/Google's consent screen, and browsers throttle setInterval
+    // heavily in backgrounded tabs — so the 1000ms poll below can end up
+    // firing far less often than that while the tab isn't focused, which is
+    // exactly the window in which the backend actually finishes the OAuth
+    // callback. Polling once immediately as soon as the tab regains
+    // focus/visibility (i.e. right as the user comes back from the popup)
+    // catches the result promptly regardless of how throttled the interval
+    // was in the meantime — this supplements the interval, it doesn't
+    // replace it.
+    const pollNow = (reason: string) => {
+      if (settled) return;
+      console.log(`[OAuth] Polling immediately — reason: ${reason}`);
+      api
+        .pollOAuthResult(state)
+        .then((result) => {
+          if (settled) return;
+          if (!result.pending) applyResult(result);
+        })
+        .catch((err) => {
+          console.error("Failed to poll OAuth result:", err);
+        });
+    };
+
+    function handleFocusRegained() {
+      if (document.visibilityState === "hidden") return;
+      pollNow(`visibility/focus regained (visibilityState=${document.visibilityState})`);
+    }
+
+    document.addEventListener("visibilitychange", handleFocusRegained);
+    window.addEventListener("focus", handleFocusRegained);
 
     // Polls the backend every second for this state token's result, and
     // watches for the popup closing. Runs until settled: a definitive
@@ -270,15 +308,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
     const CLOSE_GRACE_MS = 2000;
     let closedAt: number | null = null;
     const poll = window.setInterval(() => {
-      api
-        .pollOAuthResult(state)
-        .then((result) => {
-          if (settled) return;
-          if (!result.pending) applyResult(result);
-        })
-        .catch((err) => {
-          console.error("Failed to poll OAuth result:", err);
-        });
+      pollNow("interval tick");
 
       if (settled || !popup.closed) return;
       if (closedAt === null) {
@@ -287,6 +317,7 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
       }
       if (Date.now() - closedAt < CLOSE_GRACE_MS) return;
       clearInterval(poll);
+      removeFocusListeners();
       if (!settled) setConn(idleConnection());
     }, 1000);
   }, [sourceProviderId, destProviderId, getProviderMeta]);
