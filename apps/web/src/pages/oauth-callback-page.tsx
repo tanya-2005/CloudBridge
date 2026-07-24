@@ -27,6 +27,11 @@ export function OAuthCallbackPage() {
     console.log("[OAuth][Callback] Callback page loaded.");
     console.log("[OAuth][Callback] Current URL:", window.location.href);
     console.log("[OAuth][Callback] window.location.origin:", window.location.origin);
+    try {
+      console.log("[OAuth][Callback] window.opener?.location?.origin:", window.opener?.location?.origin);
+    } catch (err) {
+      console.log("[OAuth][Callback] window.opener.location.origin threw (opener is cross-origin):", err);
+    }
 
     const searchParams = new URLSearchParams(window.location.search);
     console.log("[OAuth][Callback] Current search params:", searchParams.toString());
