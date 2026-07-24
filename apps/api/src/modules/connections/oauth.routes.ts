@@ -41,6 +41,16 @@ function isExpired(createdAt: number): boolean {
   return Date.now() - createdAt > STATE_TTL_MS;
 }
 
+/** Uniform snapshot logger — same four fields at every requested checkpoint, so the four log points can be diffed directly against each other. */
+function logCompletedResultsState(point: string, state: string | undefined): void {
+  console.log(`[OAuth][${point}]`, {
+    state,
+    completedResultsSize: completedResults.size,
+    completedResultsGet: state ? completedResults.get(state) : undefined,
+    pid: process.pid,
+  });
+}
+
 /** Opportunistic sweep of anything nobody ever came back to collect — called on every /start so these two maps don't grow unbounded across abandoned flows. */
 function pruneExpired(): void {
   for (const [key, value] of pendingStates) {
@@ -121,6 +131,7 @@ oauthRouter.get("/:provider/start", (req, res) => {
     `[OAuth][Start] pid=${process.pid} slug=${slug} role=${role} state=${state} ` +
       `clientSupplied=${req.query.state === state} pendingStates.size=${pendingStates.size}`
   );
+  logCompletedResultsState("StateCreated", state);
 
   res.redirect(adapter.buildConsentUrl(state));
 });
@@ -129,6 +140,7 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
   const slug = req.params.provider as string;
   const state = typeof req.query.state === "string" ? req.query.state : undefined;
   console.log(`[OAuth][Callback] pid=${process.pid} EXECUTING callback for slug=${slug} state=${state}`);
+  logCompletedResultsState("CallbackStart", state);
   const pending = popValidState(state);
 
   if (!pending) {
@@ -142,9 +154,9 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
       console.log(`[OAuth][RecordOutcome] pid=${process.pid} no state — nothing to store. outcome=`, outcome);
       return;
     }
-    console.log("[OAuth][Map.set][BEFORE]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
+    logCompletedResultsState("Map.set.BEFORE", state);
     completedResults.set(state, { ...outcome, createdAt: Date.now() });
-    console.log("[OAuth][Map.set][AFTER]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
+    logCompletedResultsState("Map.set.AFTER", state);
   };
 
   const adapter = oauthProviderRegistry.get(slug);
@@ -230,9 +242,9 @@ oauthRouter.get("/:provider/callback", async (req, res) => {
  */
 oauthRouter.get("/result/:state", (req, res) => {
   const { state } = req.params;
-  console.log("[OAuth][Map.get][BEFORE]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
+  logCompletedResultsState("Map.get.BEFORE", state);
   const outcome = completedResults.get(state);
-  console.log("[OAuth][Map.get][AFTER]", { state, mapSize: completedResults.size, value: completedResults.get(state) });
+  logCompletedResultsState("Map.get.AFTER", state);
 
   if (!outcome || isExpired(outcome.createdAt)) {
     if (outcome) console.log(`[OAuth][ResultPoll] pid=${process.pid} state=${state} found but expired.`);
