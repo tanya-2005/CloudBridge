@@ -188,6 +188,7 @@ class MigrationEngine {
         filename: p.name,
         destParentId: p.destParentId,
         sizeBytes: p.sizeBytes,
+        sourceModifiedTime: p.sourceModifiedTime,
       })
     );
     migrationsRepository.update(jobId, {
@@ -322,6 +323,7 @@ class MigrationEngine {
       parentId: file.destParentId,
       filename: file.filename,
       sizeBytes: file.sizeBytes,
+      sourceModifiedTime: file.sourceModifiedTime,
       stream: createReadStream(tempPath),
       duplicateStrategy,
       credentials: destCredentials,

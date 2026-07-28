@@ -11,6 +11,10 @@ export type ProviderType = (typeof PROVIDER_TYPES)[number];
 export const CONNECTION_STATUSES = ["UNVERIFIED", "VALID", "INVALID"] as const;
 export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
 
+// OVERWRITE ("Replace" in the UI) applies a size+modified-time decision
+// hierarchy rather than blindly replacing — see google-drive.provider.ts's
+// resolveReplaceDuplicate for the full logic. SKIP/RENAME/ASK are still
+// single unconditional actions.
 export const DUPLICATE_STRATEGIES = ["SKIP", "OVERWRITE", "RENAME", "ASK"] as const;
 export type DuplicateStrategy = (typeof DUPLICATE_STRATEGIES)[number];
 

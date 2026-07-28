@@ -58,6 +58,8 @@ export interface UploadFileParams {
   parentId: string;
   filename: string;
   sizeBytes: number;
+  /** ISO 8601 timestamp of the source file, when known — used by Replace's duplicate resolution to decide "is the source newer". */
+  sourceModifiedTime?: string;
   stream: Readable;
   duplicateStrategy: DuplicateStrategy;
   credentials?: unknown;

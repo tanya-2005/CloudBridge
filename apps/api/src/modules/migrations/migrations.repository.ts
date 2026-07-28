@@ -37,7 +37,7 @@ export class MigrationsRepository {
     jobId: string,
     file: Pick<
       FileTransfer,
-      "sourcePath" | "sourceFileId" | "filename" | "destParentId" | "sizeBytes"
+      "sourcePath" | "sourceFileId" | "filename" | "destParentId" | "sizeBytes" | "sourceModifiedTime"
     >
   ): FileTransfer {
     const now = new Date().toISOString();

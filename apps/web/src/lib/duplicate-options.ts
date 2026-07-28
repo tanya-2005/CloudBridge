@@ -9,7 +9,8 @@ export const DUPLICATE_OPTIONS: DuplicateOption[] = [
   {
     id: "replace",
     label: "Replace",
-    description: "Overwrite the file already in the destination",
+    description:
+      "Compares size and modified date: skips identical files, replaces outdated ones, otherwise keeps both by renaming",
   },
   {
     id: "rename",

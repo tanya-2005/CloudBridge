@@ -25,6 +25,8 @@ export interface FileTransfer {
   filename: string;
   destParentId: string;
   sizeBytes: number;
+  /** ISO 8601 timestamp of the source file, when the source provider exposes one — used by Replace's duplicate resolution to compare against the destination's modified time. */
+  sourceModifiedTime?: string;
   transferredBytes: number;
   checksum?: string;
   status: FileStatus;
@@ -57,6 +59,8 @@ export interface RemoteNode {
   name: string;
   type: "folder" | "file";
   sizeBytes?: number;
+  /** ISO 8601 timestamp, when the provider exposes one — needed for Replace's duplicate comparison. */
+  modifiedTime?: string;
   children?: RemoteNode[];
 }
 

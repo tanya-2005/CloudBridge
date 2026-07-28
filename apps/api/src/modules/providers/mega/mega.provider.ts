@@ -27,7 +27,18 @@ function toRemoteNode(file: MegaFile): RemoteNode {
     id: file.nodeId ?? file.downloadId,
     name: file.name ?? "(untitled)",
     type: file.directory ? "folder" : "file",
-    ...(file.directory ? {} : { sizeBytes: file.size ?? 0 }),
+    ...(file.directory
+      ? {}
+      : {
+          sizeBytes: file.size ?? 0,
+          // megajs' `timestamp` is seconds since epoch (matches its own
+          // `.createdAt` getter's `timestamp * 1000` conversion) — must be
+          // converted to milliseconds before turning into an ISO string, or
+          // Replace's duplicate-resolution hierarchy would compare this
+          // against Drive's millisecond-based modifiedTime off by 1000x.
+          modifiedTime:
+            typeof file.timestamp === "number" ? new Date(file.timestamp * 1000).toISOString() : undefined,
+        }),
   };
 }
 

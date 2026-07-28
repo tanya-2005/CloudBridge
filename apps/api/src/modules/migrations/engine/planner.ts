@@ -4,6 +4,8 @@ export interface PlannedFile {
   sourceFileId: string;
   name: string;
   sizeBytes: number;
+  /** ISO 8601 timestamp of the source file, when the source provider exposes one — carried through to FileTransfer for Replace's duplicate resolution. */
+  sourceModifiedTime?: string;
   sourcePath: string;
   destParentId: string;
 }
@@ -38,6 +40,7 @@ export async function planMigrationTree(
     sourceFileId: f.id,
     name: f.name,
     sizeBytes: f.sizeBytes ?? 0,
+    sourceModifiedTime: f.modifiedTime,
     sourcePath: `${pathPrefix}/${f.name}`,
     destParentId,
   }));

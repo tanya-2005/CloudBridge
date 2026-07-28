@@ -26,7 +26,7 @@ function toRemoteNode(file: drive_v3.Schema$File): RemoteNode {
     id: file.id ?? "",
     name: file.name ?? "(untitled)",
     type: isFolder ? "folder" : "file",
-    ...(isFolder ? {} : { sizeBytes: file.size ? Number(file.size) : 0 }),
+    ...(isFolder ? {} : { sizeBytes: file.size ? Number(file.size) : 0, modifiedTime: file.modifiedTime ?? undefined }),
   };
 }
 
@@ -108,7 +108,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
       const parentId = folderId ?? getDriveRootFolderId();
       const files = await listAllFiles(drive, {
         q: `'${parentId}' in parents and mimeType != '${FOLDER_MIME_TYPE}' and trashed = false`,
-        fields: "nextPageToken, files(id, name, mimeType, size)",
+        fields: "nextPageToken, files(id, name, mimeType, size, modifiedTime)",
         pageSize: 200,
         orderBy: "name",
       });
@@ -161,7 +161,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
       const drive = resolveClient(credentials);
       const res = await drive.files.list({
         q: `'${parentId}' in parents and name = '${escapeQueryValue(filename)}' and trashed = false`,
-        fields: "files(id, name, mimeType, size)",
+        fields: "files(id, name, mimeType, size, modifiedTime)",
         pageSize: 1,
       });
       const file = res.data.files?.[0];
@@ -170,7 +170,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
   }
 
   async uploadFile(params: UploadFileParams): Promise<UploadOutcome> {
-    const { parentId, sizeBytes, stream, duplicateStrategy, credentials, onProgress } = params;
+    const { parentId, sizeBytes, sourceModifiedTime, stream, duplicateStrategy, credentials, onProgress } = params;
     let filename = params.filename;
 
     const existing = await this.exists(credentials, parentId, filename);
@@ -181,18 +181,8 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
           return { status: "skipped", existing };
         case "ASK":
           return { status: "conflict", existing };
-        case "OVERWRITE": {
-          const file = await runDriveCall(async () => {
-            const drive = resolveClient(credentials);
-            const res = await drive.files.update({
-              fileId: existing.id,
-              media: { body: withProgress(stream, sizeBytes, onProgress) },
-              fields: "id, name, mimeType, size",
-            });
-            return toRemoteNode(res.data);
-          });
-          return { status: "uploaded", file };
-        }
+        case "OVERWRITE":
+          return this.resolveReplaceDuplicate(existing, params);
         case "RENAME":
           filename = await this.resolveAvailableName(credentials, parentId, filename);
           break;
@@ -202,13 +192,119 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
     const file = await runDriveCall(async () => {
       const drive = resolveClient(credentials);
       const res = await drive.files.create({
-        requestBody: { name: filename, parents: [parentId] },
+        // Preserving the source's modified time (rather than letting Drive
+        // stamp "now") is what lets a later re-run's timestamp comparison
+        // recognize an unchanged file as identical instead of never
+        // matching — see resolveReplaceDuplicate below.
+        requestBody: { name: filename, parents: [parentId], ...(sourceModifiedTime ? { modifiedTime: sourceModifiedTime } : {}) },
         media: { body: withProgress(stream, sizeBytes, onProgress) },
-        fields: "id, name, mimeType, size",
+        fields: "id, name, mimeType, size, modifiedTime",
       });
       return toRemoteNode(res.data);
     });
     return { status: "uploaded", file };
+  }
+
+  // ===================================================================
+  // Replace ("OVERWRITE") duplicate resolution hierarchy
+  // ===================================================================
+  // Runs whenever duplicateStrategy === "OVERWRITE" and a same-named file
+  // already exists at the destination. Rather than blindly overwriting,
+  // it applies this decision tree:
+  //
+  //   existing found
+  //     │
+  //     ├─ size AND modified time both match  → SKIP (already identical)
+  //     │
+  //     └─ otherwise (something differs):
+  //           ├─ source is newer OR sizes differ  → try REPLACE
+  //           │        └─ REPLACE throws           → fall back to RENAME
+  //           └─ (same size, source not newer)     → RENAME directly
+  //                    └─ RENAME throws             → fall back to ASK
+  //                                                    (return a conflict —
+  //                                                    the caller/UI surfaces
+  //                                                    this exactly like the
+  //                                                    existing ASK strategy)
+  //
+  // Missing timestamps on either side are treated as "can't prove identical"
+  // (never skip) and "can't prove the source is newer" (falls through to
+  // rename rather than blindly overwriting) — the safe default for both
+  // ambiguous cases. SKIP, RENAME, and ASK selected directly by the user
+  // are unaffected by any of this — see the switch above.
+  // ===================================================================
+  private async resolveReplaceDuplicate(
+    existing: RemoteNode,
+    params: UploadFileParams
+  ): Promise<UploadOutcome> {
+    const { parentId, filename, sizeBytes, sourceModifiedTime, stream, credentials, onProgress } = params;
+
+    const sizesMatch = existing.sizeBytes === sizeBytes;
+    const existingModifiedMs = existing.modifiedTime ? new Date(existing.modifiedTime).getTime() : undefined;
+    const sourceModifiedMs = sourceModifiedTime ? new Date(sourceModifiedTime).getTime() : undefined;
+    const timestampsMatch =
+      existingModifiedMs !== undefined && sourceModifiedMs !== undefined && existingModifiedMs === sourceModifiedMs;
+
+    // Step 1 + 2: identical by both measures → skip, nothing to transfer.
+    if (sizesMatch && timestampsMatch) {
+      return { status: "skipped", existing };
+    }
+
+    // Step 3: decide whether this looks like a genuine update worth replacing.
+    const sourceIsNewer =
+      sourceModifiedMs !== undefined && existingModifiedMs !== undefined && sourceModifiedMs > existingModifiedMs;
+    const shouldReplace = sourceIsNewer || !sizesMatch;
+
+    if (shouldReplace) {
+      try {
+        const file = await runDriveCall(async () => {
+          const drive = resolveClient(credentials);
+          const res = await drive.files.update({
+            fileId: existing.id,
+            // See uploadFile's create() call for why this matters.
+            requestBody: sourceModifiedTime ? { modifiedTime: sourceModifiedTime } : {},
+            media: { body: withProgress(stream, sizeBytes, onProgress) },
+            fields: "id, name, mimeType, size, modifiedTime",
+          });
+          return toRemoteNode(res.data);
+        });
+        return { status: "uploaded", file };
+      } catch (err) {
+        // Step 4: replace failed (provider limitation, permission issue,
+        // etc.) — fall back to rename instead of failing the file outright.
+        console.warn(
+          `Replace duplicate resolution: replace failed for "${filename}", falling back to rename.`,
+          err
+        );
+      }
+    }
+
+    // Reached either because replace failed above, or because the tree
+    // routes here directly (same size, source not newer than destination).
+    try {
+      const renamedName = await this.resolveAvailableName(credentials, parentId, filename);
+      const file = await runDriveCall(async () => {
+        const drive = resolveClient(credentials);
+        const res = await drive.files.create({
+          requestBody: {
+            name: renamedName,
+            parents: [parentId],
+            ...(sourceModifiedTime ? { modifiedTime: sourceModifiedTime } : {}),
+          },
+          media: { body: withProgress(stream, sizeBytes, onProgress) },
+          fields: "id, name, mimeType, size, modifiedTime",
+        });
+        return toRemoteNode(res.data);
+      });
+      return { status: "uploaded", file };
+    } catch (err) {
+      // Step 5: rename also failed — don't fail silently, defer to the user
+      // exactly like the existing ASK strategy does.
+      console.warn(
+        `Replace duplicate resolution: rename failed for "${filename}", falling back to ask.`,
+        err
+      );
+      return { status: "conflict", existing };
+    }
   }
 
   private async resolveAvailableName(
