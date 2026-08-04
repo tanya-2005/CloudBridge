@@ -2,6 +2,10 @@
 
 **CloudBridge** is a full-stack cloud-to-cloud file migration platform that enables secure file transfers between cloud storage providers without requiring users to manually download and re-upload files.
 
+## 🌐 Live Demo
+
+🚀 **Application:** https://cloud-bridge-chi.vercel.app
+
 Currently supported providers:
 - ✅ Google Drive
 - ✅ MEGA
