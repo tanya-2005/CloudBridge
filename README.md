@@ -4,7 +4,7 @@
 
 ## 🌐 Live Demo
 
-🚀 **Application:** https://cloud-bridge-chi.vercel.app
+🚀 **Application:** https://cloudbridge-production.up.railway.app/
 
 Currently supported providers:
 - ✅ Google Drive
