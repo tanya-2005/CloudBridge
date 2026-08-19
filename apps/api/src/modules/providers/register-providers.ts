@@ -14,7 +14,13 @@ import { providerRegistry } from "./provider-registry.js";
  * (Dropbox, OneDrive, ...) means writing its adapter and adding a few
  * lines here — nothing else in the app needs to change.
  */
-providerRegistry.register(new MegaProvider());
+// MEGA implements both SourceProvider and DestinationProvider — the same
+// instance is registered in both registries, same as Google Drive below.
+// Unlike Drive, MEGA has no server-configured auth mode, so it's always
+// registered unconditionally; each connection brings its own credentials.
+const mega = new MegaProvider();
+providerRegistry.register(mega);
+destinationProviderRegistry.register(mega);
 
 // Google Drive implements both SourceProvider and DestinationProvider —
 // the same instance is registered in both registries, so it's selectable

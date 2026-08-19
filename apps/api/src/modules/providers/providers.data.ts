@@ -27,7 +27,7 @@ export const PROVIDERS: ProviderMetaBase[] = [
   {
     id: "MEGA",
     name: "MEGA",
-    roles: ["source"],
+    roles: ["source", "destination"],
     capabilities: { resumableUpload: false, checksum: "none" },
   },
   {
