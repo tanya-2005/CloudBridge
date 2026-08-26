@@ -147,6 +147,8 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
   async getReadStream(credentials: unknown, fileId: string): Promise<RemoteFileHandle> {
     return runDriveCall(async () => {
       const drive = resolveClient(credentials);
+      // ── Diagnostic: metadata fetch ──
+      console.error(`[GoogleDrive] files.get operation=metadata fileId=${fileId} role=source`);
       const meta = await drive.files.get({ fileId, fields: "name, size, mimeType", supportsAllDrives: true });
 
       if (meta.data.mimeType?.startsWith(GOOGLE_APPS_MIME_PREFIX)) {
@@ -155,6 +157,8 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
         );
       }
 
+      // ── Diagnostic: media download ──
+      console.error(`[GoogleDrive] files.get operation=media fileId=${fileId} role=source`);
       const res = await drive.files.get(
         { fileId, alt: "media", supportsAllDrives: true },
         { responseType: "stream" }
