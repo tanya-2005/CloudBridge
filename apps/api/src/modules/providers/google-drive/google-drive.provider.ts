@@ -11,9 +11,10 @@ import type {
   UploadOutcome,
 } from "../provider.interface.js";
 import { getDriveClient } from "./google-drive.client.js";
-import { getDriveRootFolderId } from "./google-drive.config.js";
+import { getDriveRootFolderId, isGoogleDriveConfigured } from "./google-drive.config.js";
 import { runDriveCall, translateDriveError } from "./google-drive.errors.js";
 import { getOAuthDriveClient, isOAuthCredentials } from "./google-drive.oauth.js";
+import { isGoogleOAuthConfigured } from "./google-drive.oauth-config.js";
 import { withProgress } from "./progress-stream.js";
 
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
@@ -68,6 +69,29 @@ async function listAllFiles(
  */
 function resolveClient(credentials: unknown): drive_v3.Drive {
   if (isOAuthCredentials(credentials)) return getOAuthDriveClient(credentials);
+
+  // No valid credentials supplied — surface the most likely cause instead of
+  // falling through to the service-account path (which throws an opaque error
+  // when neither GOOGLE_SERVICE_ACCOUNT_KEY_FILE nor GOOGLE_SERVICE_ACCOUNT_KEY
+  // is set, i.e. the common production case).
+  if (!isGoogleDriveConfigured() && !isGoogleOAuthConfigured()) {
+    throw new Error(
+      "Google Drive is not available — no authentication is configured. " +
+        "Set either (a) GOOGLE_SERVICE_ACCOUNT_KEY_FILE or GOOGLE_SERVICE_ACCOUNT_KEY for a shared service account, " +
+        "or (b) GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT_URI for per-connection OAuth."
+    );
+  }
+
+  // OAuth is configured but this connection has no valid stored credentials
+  // (e.g. the user hasn't completed the OAuth consent flow yet).
+  if (isGoogleOAuthConfigured() && !isGoogleDriveConfigured()) {
+    throw new Error(
+      "Google Drive OAuth is configured on this server, but this connection has no stored credentials. " +
+        "Reconnect the account via the Google Drive OAuth sign-in flow."
+    );
+  }
+
+  // Only the service-account path remains.
   return getDriveClient();
 }
 
@@ -91,6 +115,8 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
         fields: "nextPageToken, files(id, name, mimeType)",
         pageSize: 200,
         orderBy: "name",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
       return files.map(toRemoteNode);
     });
@@ -111,6 +137,8 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
         fields: "nextPageToken, files(id, name, mimeType, size, modifiedTime)",
         pageSize: 200,
         orderBy: "name",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
       return files.filter((f) => !f.mimeType?.startsWith(GOOGLE_APPS_MIME_PREFIX)).map(toRemoteNode);
     });
@@ -119,7 +147,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
   async getReadStream(credentials: unknown, fileId: string): Promise<RemoteFileHandle> {
     return runDriveCall(async () => {
       const drive = resolveClient(credentials);
-      const meta = await drive.files.get({ fileId, fields: "name, size, mimeType" });
+      const meta = await drive.files.get({ fileId, fields: "name, size, mimeType", supportsAllDrives: true });
 
       if (meta.data.mimeType?.startsWith(GOOGLE_APPS_MIME_PREFIX)) {
         throw new ValidationError(
@@ -128,7 +156,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
       }
 
       const res = await drive.files.get(
-        { fileId, alt: "media" },
+        { fileId, alt: "media", supportsAllDrives: true },
         { responseType: "stream" }
       );
 
@@ -151,6 +179,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
       const res = await drive.files.create({
         requestBody: { name, mimeType: FOLDER_MIME_TYPE, parents: [parentId] },
         fields: "id, name, mimeType",
+        supportsAllDrives: true,
       });
       return toRemoteNode(res.data);
     });
@@ -163,6 +192,8 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
         q: `'${parentId}' in parents and name = '${escapeQueryValue(filename)}' and trashed = false`,
         fields: "files(id, name, mimeType, size, modifiedTime)",
         pageSize: 1,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
       const file = res.data.files?.[0];
       return file ? toRemoteNode(file) : null;
@@ -189,6 +220,12 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
       }
     }
 
+    // ── Diagnostic: log upload context (no secrets) ──
+    console.error(
+      `[GoogleDrive upload] operation=files.create parentId=${parentId} filename=${filename} isOAuth=${isOAuthCredentials(credentials)}`
+    );
+    // ── End diagnostic ──
+
     const file = await runDriveCall(async () => {
       const drive = resolveClient(credentials);
       const res = await drive.files.create({
@@ -199,6 +236,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
         requestBody: { name: filename, parents: [parentId], ...(sourceModifiedTime ? { modifiedTime: sourceModifiedTime } : {}) },
         media: { body: withProgress(stream, sizeBytes, onProgress) },
         fields: "id, name, mimeType, size, modifiedTime",
+        supportsAllDrives: true,
       });
       return toRemoteNode(res.data);
     });
@@ -264,6 +302,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
             requestBody: sourceModifiedTime ? { modifiedTime: sourceModifiedTime } : {},
             media: { body: withProgress(stream, sizeBytes, onProgress) },
             fields: "id, name, mimeType, size, modifiedTime",
+            supportsAllDrives: true,
           });
           return toRemoteNode(res.data);
         });
@@ -292,6 +331,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
           },
           media: { body: withProgress(stream, sizeBytes, onProgress) },
           fields: "id, name, mimeType, size, modifiedTime",
+          supportsAllDrives: true,
         });
         return toRemoteNode(res.data);
       });

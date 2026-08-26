@@ -85,6 +85,20 @@ export function translateDriveError(err: unknown): AppError {
   const reasons = extractGoogleErrorReasons(err);
   const message = err instanceof Error ? err.message.toLowerCase() : "";
 
+  // ── Diagnostic: log raw Google API error details (no secrets) ──
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  console.error(
+    `[GoogleDrive diagnostics] HTTP ${status ?? "?"} | reasons: [${reasons.join(", ")}] | raw: ${rawMessage.slice(0, 300)}`
+  );
+  // If the error has a response body, log the top-level error structure
+  if (err && typeof err === "object") {
+    const resp = (err as { response?: { data?: unknown } }).response?.data;
+    if (resp) {
+      console.error(`[GoogleDrive diagnostics] response.body:`, JSON.stringify(resp).slice(0, 500));
+    }
+  }
+  // ── End diagnostic ──
+
   const isRateLimited = status === 429 || reasons.some((r) => RATE_LIMIT_REASONS.has(r));
   if (isRateLimited) {
     console.warn(
@@ -119,6 +133,18 @@ export function translateDriveError(err: unknown): AppError {
     console.error(`Google Drive denied access to a specific file (reason: ${reasons.join(", ")}).`);
     return new PermanentFileError(
       "Google Drive denied access to this file — check that it's shared with the account being used, or skip it."
+    );
+  }
+
+  // 404 "notFound" means the resource (folder, file, etc.) doesn't exist or
+  // isn't accessible — retrying is pointless, so surface it as permanent.
+  const isNotFound = status === 404 || reasons.some((r) => r === "notFound");
+  if (isNotFound) {
+    console.error(
+      `Google Drive resource not found (HTTP 404${reasons.length ? `, reason: ${reasons.join(", ")}` : ""}). The destination folder may not exist, may be in a different Google account, or may require Shared Drive access.`
+    );
+    return new PermanentFileError(
+      `Google Drive resource not found (HTTP 404)${reasons.length ? ` — reason: ${reasons.join(", ")}` : ""}. The folder may not exist, may belong to a different account, or may need Shared Drive access.`
     );
   }
 
