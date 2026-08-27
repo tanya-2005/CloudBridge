@@ -92,13 +92,71 @@ export class MegaProvider implements SourceProvider, DestinationProvider {
   }
 
   async getReadStream(credentials: unknown, fileId: string): Promise<RemoteFileHandle> {
+    const t0 = Date.now();
     const storage = await this.authenticate(credentials);
     const file = storage.files[fileId];
     if (!file) throw new NotFoundError("MEGA file", fileId);
     if (file.directory) throw new ValidationError(`"${fileId}" is a folder, not a file.`);
 
+    // ── Diagnostic: file metadata ──
+    console.error(
+      `[MEGA download] fileId=${fileId} name="${file.name}" size=${file.size} ` +
+      `type=${file.type} createdAt=${file.createdAt} ` +
+      `nodeId=${file.nodeId} downloadId=${file.downloadId} keys=${Object.keys(file).join(",")}`
+    );
+
+    // ── Diagnostic: time the download() call itself ──
+    const dlStart = Date.now();
+    const stream = file.download({}) as unknown as Readable;
+    const dlMs = Date.now() - dlStart;
+    console.error(`[MEGA download] file.download() returned in ${dlMs}ms for "${file.name}"`);
+
+    // ── Diagnostic: attach stream lifecycle listeners ──
+    let firstByteTime: number | undefined;
+    let totalBytes = 0;
+    let emittedEnd = false;
+    let emittedError = false;
+
+    stream.on("open", () => {
+      console.error(`[MEGA download] stream.open fired for "${file.name}" (+${Date.now() - t0}ms from start)`);
+    });
+    stream.on("data", (chunk: Buffer) => {
+      if (firstByteTime === undefined) {
+        firstByteTime = Date.now();
+        console.error(
+          `[MEGA download] FIRST DATA for "${file.name}" ` +
+          `${chunk.length} bytes, +${firstByteTime - t0}ms from start, ` +
+          `+${firstByteTime - dlStart}ms after download()`
+        );
+      }
+      totalBytes += chunk.length;
+    });
+    stream.on("end", () => {
+      emittedEnd = true;
+      console.error(
+        `[MEGA download] stream.end for "${file.name}" totalBytes=${totalBytes} ` +
+        `+${Date.now() - t0}ms from start`
+      );
+    });
+    stream.on("error", (err: unknown) => {
+      emittedError = true;
+      console.error(
+        `[MEGA download] stream.error for "${file.name}" ` +
+        `+${Date.now() - t0}ms from start, error=`, err
+      );
+    });
+    stream.on("close", () => {
+      console.error(
+        `[MEGA download] stream.close for "${file.name}" ` +
+        `end=${emittedEnd} error=${emittedError} bytes=${totalBytes} ` +
+        `+${Date.now() - t0}ms from start`
+      );
+    });
+
+    console.error(`[MEGA download] returning stream for "${file.name}" +${Date.now() - t0}ms from start`);
+
     return {
-      stream: file.download({}),
+      stream,
       filename: file.name ?? fileId,
       sizeBytes: file.size ?? 0,
     };

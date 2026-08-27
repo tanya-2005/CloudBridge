@@ -394,8 +394,12 @@ class MigrationEngine {
     onProgress?: () => void,
     signal?: AbortSignal
   ): Promise<void> {
+    const t0 = Date.now();
+    console.error(`[downloadToTemp] START file=${file.filename} fileId=${file.sourceFileId}`);
     const handle = await sourceProvider.getReadStream(sourceCredentials, file.sourceFileId);
+    const getStreamMs = Date.now() - t0;
     const totalBytes = handle.sizeBytes || file.sizeBytes;
+    console.error(`[downloadToTemp] getReadStream returned in ${getStreamMs}ms, sizeBytes=${totalBytes}`);
 
     const progress = createProgressTransform(totalBytes, ({ bytesTransferred }) => {
       onProgress?.();
@@ -410,8 +414,11 @@ class MigrationEngine {
     signal?.addEventListener("abort", onAbort, { once: true });
 
     try {
+      console.error(`[downloadToTemp] pipeline START for "${file.filename}"`);
       await pipeline(handle.stream, progress, createWriteStream(tempPath));
+      console.error(`[downloadToTemp] pipeline DONE for "${file.filename}" in ${Date.now() - t0}ms`);
     } catch (err) {
+      console.error(`[downloadToTemp] pipeline ERROR for "${file.filename}" after ${Date.now() - t0}ms:`, err);
       // Only translate provider errors — AbortError from our own
       // destroy() should propagate as-is so the caller knows it was
       // cancelled, not a provider failure.
