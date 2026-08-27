@@ -11,7 +11,7 @@ import type {
   UploadOutcome,
   UploadProgress,
 } from "../provider.interface.js";
-import { getMegaSession, type MegaCredentials } from "./mega.session.js";
+import { dropMegaSession, getMegaSession, type MegaCredentials } from "./mega.session.js";
 import { runMegaCall, translateMegaError } from "./mega.errors.js";
 
 /**
@@ -66,6 +66,10 @@ function toRemoteNode(file: MegaFile): RemoteNode {
 export class MegaProvider implements SourceProvider, DestinationProvider {
   readonly type = "MEGA" as const;
 
+  // MEGA uses a single shared TCP connection per session — parallel
+  // downloads compete for the same socket and hang. Serialize to 1.
+  readonly maxConcurrentTransfers = 1;
+
   async testConnection(credentials: unknown): Promise<{ account: string }> {
     const storage = await this.authenticate(credentials);
     return { account: storage.email ?? this.requireCredentials(credentials).email };
@@ -102,6 +106,19 @@ export class MegaProvider implements SourceProvider, DestinationProvider {
 
   translateError(err: unknown): AppError {
     return translateMegaError(err);
+  }
+
+  /**
+   * Drop the cached MEGA session so the retry creates a fresh TCP
+   * connection. This is critical after a stall — the old session's
+   * connection is hung and retries on the same session will hang too.
+   */
+  beforeRetry(credentials: unknown): void {
+    const creds = isMegaCredentials(credentials) ? credentials : undefined;
+    if (creds) {
+      console.log(`[MEGA] beforeRetry: dropping cached session for ${creds.email}`);
+      dropMegaSession(creds.email);
+    }
   }
 
   async createFolder(credentials: unknown, parentId: string, name: string): Promise<RemoteNode> {

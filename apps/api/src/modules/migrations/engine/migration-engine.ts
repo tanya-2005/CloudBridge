@@ -22,7 +22,7 @@ import {
 } from "./temp-storage.js";
 import { withRetry } from "./retry.js";
 
-const CONCURRENCY = 3;
+const DEFAULT_CONCURRENCY = 3;
 /**
  * If an individual file transfer (download + upload) does not complete within
  * this timeout, the file is failed. This prevents streams that hang without
@@ -236,7 +236,11 @@ class MigrationEngine {
     // the job has no more in-flight work at all.
     const tempDir = await createJobTempDir(jobId);
 
-    await runWithConcurrency(files, CONCURRENCY, (file) =>
+    // Use the source provider's concurrency limit if set, otherwise
+    // fall back to the engine default. MEGA serializes to 1 because
+    // its single-connection API can't handle parallel downloads.
+    const concurrency = providers.sourceProvider.maxConcurrentTransfers ?? DEFAULT_CONCURRENCY;
+    await runWithConcurrency(files, concurrency, (file) =>
       this.transferFile(jobId, file, tempDir, providers, job.duplicateStrategy)
     );
   }
@@ -313,7 +317,12 @@ class MigrationEngine {
       const transferPromise = (async () => {
         await withRetry(
           () => this.downloadToTemp(jobId, file, sourceProvider, sourceCredentials, tempPath, resetStallTimer, abortController.signal),
-          (attempt) => migrationsRepository.updateFile(jobId, file.id, { attempts: attempt })
+          (attempt) => {
+            migrationsRepository.updateFile(jobId, file.id, { attempts: attempt });
+            // On retry, let the provider discard stale state (e.g. a hung
+            // MEGA session) so the next attempt gets a fresh connection.
+            sourceProvider.beforeRetry?.(sourceCredentials);
+          }
         );
 
         const outcome = await withRetry(

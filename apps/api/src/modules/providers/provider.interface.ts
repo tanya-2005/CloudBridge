@@ -21,6 +21,15 @@ export interface RemoteFileHandle {
 export interface SourceProvider {
   readonly type: ProviderType;
 
+  /**
+   * Maximum number of concurrent file transfers this provider supports.
+   * MEGA uses a single shared TCP connection per session, so parallel
+   * downloads compete for the same socket and can hang. Providers that
+   * support parallelism (e.g. Google Drive with per-request auth) can
+   * omit this to use the engine's default.
+   */
+  readonly maxConcurrentTransfers?: number;
+
   /** Verifies credentials against the real provider and returns an identity label. */
   testConnection(credentials: unknown): Promise<{ account: string }>;
 
@@ -42,6 +51,14 @@ export interface SourceProvider {
    * migration-engine.ts's `translateError` helper).
    */
   translateError?(err: unknown): AppError;
+
+  /**
+   * Called before each retry attempt for a failed transfer. Lets the
+   * provider discard stale internal state (e.g. a cached MEGA session
+   * with a broken TCP connection) so the retry gets a fresh connection.
+   * Called with the credentials that will be used for the retry.
+   */
+  beforeRetry?(credentials: unknown): Promise<void> | void;
 }
 
 export interface UploadProgress {
