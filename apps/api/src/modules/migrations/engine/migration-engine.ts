@@ -157,7 +157,12 @@ class MigrationEngine {
     try {
       const rootFolderId =
         job.sourceRootPath === "/" || job.sourceRootPath === "" ? undefined : job.sourceRootPath;
-      planned = await planMigrationTree(providers, rootFolderId, job.destRootFolderId);
+      // The frontend uses "/" as a sentinel for Google Drive's root folder,
+      // but the Drive API expects the literal string "root". Normalize here
+      // so every downstream caller (planner, upload, validate) receives a
+      // valid Drive file ID.
+      const destRootFolderId = job.destRootFolderId === "/" ? "root" : job.destRootFolderId;
+      planned = await planMigrationTree(providers, rootFolderId, destRootFolderId);
     } catch (err) {
       const message = err instanceof AppError ? err.message : "Unexpected error while planning.";
       console.error(`Migration ${jobId} planning failed:`, err);

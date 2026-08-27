@@ -185,10 +185,14 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
    * fail with a 404.
    */
   async validateDestinationFolder(credentials: unknown, folderId: string): Promise<void> {
+    // Defensive: normalize the frontend's root sentinel "/" to Google Drive's
+    // literal root ID. The engine normalizes this before calling the planner,
+    // but this guard catches any future caller that passes "/" directly.
+    const resolvedFolderId = folderId === "/" ? "root" : folderId;
     await runDriveCall(async () => {
       const drive = resolveClient(credentials);
       const res = await drive.files.get({
-        fileId: folderId,
+        fileId: resolvedFolderId,
         fields: "id, name, mimeType",
         supportsAllDrives: true,
       });
