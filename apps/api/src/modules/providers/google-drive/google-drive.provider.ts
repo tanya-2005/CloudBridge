@@ -140,7 +140,7 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       });
-      return files.filter((f) => !f.mimeType?.startsWith(GOOGLE_APPS_MIME_PREFIX)).map(toRemoteNode);
+      return files.filter((f: drive_v3.Schema$File) => !f.mimeType?.startsWith(GOOGLE_APPS_MIME_PREFIX)).map(toRemoteNode);
     });
   }
 

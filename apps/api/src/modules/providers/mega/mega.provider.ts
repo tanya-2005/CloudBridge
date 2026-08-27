@@ -107,7 +107,7 @@ export class MegaProvider implements SourceProvider, DestinationProvider {
 
     // ── Diagnostic: time the download() call itself ──
     const dlStart = Date.now();
-    const stream = file.download({}) as unknown as Readable;
+    const stream = file.download({ maxConnections: 1 }) as unknown as Readable;
     const dlMs = Date.now() - dlStart;
     console.error(`[MEGA download] file.download() returned in ${dlMs}ms for "${file.name}"`);
 

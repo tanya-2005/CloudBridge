@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = Number(process.env.PORT) || 4173;
-const BACKEND_API_URL = process.env.BACKEND_API_URL || "https://appsapi-production-b648.up.railway.app";
+const BACKEND_API_URL = process.env.BACKEND_API_URL || "https://130-210-50-67.nip.io";
 const DIST_DIR = path.join(__dirname, "dist");
 const INDEX_FILE = path.join(DIST_DIR, "index.html");
 
