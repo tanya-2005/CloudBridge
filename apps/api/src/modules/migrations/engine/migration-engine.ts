@@ -1,6 +1,6 @@
 import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
-import { AppError, TransientProviderError } from "../../../common/errors/app-error.js";
+import { AppError, PermanentFileError, TransientProviderError } from "../../../common/errors/app-error.js";
 import { createProgressTransform } from "../../../common/streams/progress-transform.js";
 import type { DuplicateStrategy, JobStatus } from "../../../types/enums.js";
 import type { FileTransfer, LogLevel } from "../../../types/models.js";
@@ -23,6 +23,18 @@ import {
 import { withRetry } from "./retry.js";
 
 const CONCURRENCY = 3;
+/**
+ * If an individual file transfer (download + upload) does not complete within
+ * this timeout, the file is failed. This prevents streams that hang without
+ * emitting data or errors from blocking the migration indefinitely.
+ */
+const FILE_TRANSFER_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+/**
+ * If no progress callback fires for this long during a file transfer, the
+ * file is failed. This catches stalls where the connection is alive but no
+ * data is flowing (e.g. MEGA stream hanging, Google Drive upload stalling).
+ */
+const TRANSFER_STALL_TIMEOUT_MS = 60 * 1000; // 60 seconds
 
 const TERMINAL_STATUSES = new Set<JobStatus>([
   "COMPLETED",
@@ -248,35 +260,104 @@ class MigrationEngine {
       errorMessage: undefined,
     });
 
+    // ── Stall detection ──
+    // If no progress callback fires for TRANSFER_STALL_TIMEOUT_MS the
+    // stream is assumed hung (e.g. MEGA download stall, Google Drive
+    // upload hang).  We track this via a shared timestamp that both
+    // downloadToTemp and uploadFromTemp update through onProgress.
+    let lastProgressTime = Date.now();
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    let transferTimedOut = false;
+
+    const resetStallTimer = () => {
+      lastProgressTime = Date.now();
+    };
+    const startStallTimer = () => {
+      stallTimer = setInterval(() => {
+        if (Date.now() - lastProgressTime > TRANSFER_STALL_TIMEOUT_MS) {
+          transferTimedOut = true;
+          console.error(
+            `[MigrationEngine] file ${file.id} ("${file.filename}") stalled — no progress for ${TRANSFER_STALL_TIMEOUT_MS / 1000}s. Aborting transfer.`
+          );
+          this.log(jobId, "error", `Transfer of "${file.filename}" stalled — no progress for ${TRANSFER_STALL_TIMEOUT_MS / 1000}s.`);
+          abortController.abort();
+        }
+      }, 5_000);
+    };
+    const stopStallTimer = () => {
+      if (stallTimer !== undefined) clearInterval(stallTimer);
+    };
+
+    // ── Overall file-transfer timeout ──
+    const abortController = new AbortController();
+    let overallTimer: ReturnType<typeof setTimeout> | undefined;
+    const startOverallTimer = () => {
+      overallTimer = setTimeout(() => {
+        transferTimedOut = true;
+        console.error(
+          `[MigrationEngine] file ${file.id} ("${file.filename}") exceeded ${FILE_TRANSFER_TIMEOUT_MS / 1000}s overall timeout. Aborting.`
+        );
+        this.log(jobId, "error", `Transfer of "${file.filename}" exceeded ${FILE_TRANSFER_TIMEOUT_MS / 1000}s timeout.`);
+        abortController.abort();
+      }, FILE_TRANSFER_TIMEOUT_MS);
+    };
+    const stopOverallTimer = () => {
+      if (overallTimer !== undefined) clearTimeout(overallTimer);
+    };
+
+    startOverallTimer();
+    startStallTimer();
+
     try {
-      await withRetry(
-        () => this.downloadToTemp(jobId, file, sourceProvider, sourceCredentials, tempPath),
-        (attempt) => migrationsRepository.updateFile(jobId, file.id, { attempts: attempt })
-      );
+      // Race the entire transfer against the timeout.
+      const transferPromise = (async () => {
+        await withRetry(
+          () => this.downloadToTemp(jobId, file, sourceProvider, sourceCredentials, tempPath, resetStallTimer, abortController.signal),
+          (attempt) => migrationsRepository.updateFile(jobId, file.id, { attempts: attempt })
+        );
 
-      const outcome = await withRetry(
-        () => this.uploadFromTemp(jobId, file, destProvider, destCredentials, tempPath, strategy),
-        (attempt) => migrationsRepository.updateFile(jobId, file.id, { attempts: attempt })
-      );
+        const outcome = await withRetry(
+          () => this.uploadFromTemp(jobId, file, destProvider, destCredentials, tempPath, strategy, resetStallTimer),
+          (attempt) => migrationsRepository.updateFile(jobId, file.id, { attempts: attempt })
+        );
 
-      if (outcome.status === "skipped") {
-        this.updateFileProgress(jobId, file.id, { status: "SKIPPED", duplicateAction: "SKIP" });
-        this.log(jobId, "info", `Skipped "${file.filename}" — already exists at the destination.`);
-      } else if (outcome.status === "conflict") {
-        this.updateFileProgress(jobId, file.id, { status: "CONFLICT" });
-        this.log(jobId, "warning", `Duplicate found for "${file.filename}" — waiting for your decision.`);
-      } else {
-        // outcome.file.name is the *actual* name Drive used, which can
-        // differ from file.filename under RENAME — persist it so callers
-        // (and the UI) see what really landed at the destination, not just
-        // what was originally requested.
-        this.updateFileProgress(jobId, file.id, {
-          status: "DONE",
-          transferredBytes: file.sizeBytes,
-          filename: outcome.file.name,
-        });
-        this.log(jobId, "success", `Transferred "${outcome.file.name}".`);
-      }
+        // Guard: if the abort signal fired while we were uploading, don't
+        // overwrite the FAILED status that the catch block is about to set.
+        if (abortController.signal.aborted) return;
+
+        if (outcome.status === "skipped") {
+          this.updateFileProgress(jobId, file.id, { status: "SKIPPED", duplicateAction: "SKIP" });
+          this.log(jobId, "info", `Skipped "${file.filename}" — already exists at the destination.`);
+        } else if (outcome.status === "conflict") {
+          this.updateFileProgress(jobId, file.id, { status: "CONFLICT" });
+          this.log(jobId, "warning", `Duplicate found for "${file.filename}" — waiting for your decision.`);
+        } else {
+          this.updateFileProgress(jobId, file.id, {
+            status: "DONE",
+            transferredBytes: file.sizeBytes,
+            filename: outcome.file.name,
+          });
+          this.log(jobId, "success", `Transferred "${outcome.file.name}".`);
+        }
+      })();
+
+      const abortPromise = new Promise<never>((_, reject) => {
+        abortController.signal.addEventListener("abort", () => {
+          reject(new PermanentFileError(
+            transferTimedOut
+              ? `Transfer timed out — no progress for ${TRANSFER_STALL_TIMEOUT_MS / 1000}s.`
+              : `Transfer exceeded ${FILE_TRANSFER_TIMEOUT_MS / 1000}s overall timeout.`
+          ));
+        }, { once: true });
+      });
+
+      await Promise.race([transferPromise, abortPromise]);
+
+      // Suppress any late rejection from the transfer IIFE after the
+      // race settled (e.g. the abort-signal destroyed the MEGA stream,
+      // pipeline rejected, uploadFromTemp tried to read the already-
+      // deleted temp file). The catch block above already set FAILED.
+      transferPromise.catch(() => {});
     } catch (err) {
       const appError =
         err instanceof AppError ? err : new TransientProviderError("Unexpected transfer failure.");
@@ -287,6 +368,9 @@ class MigrationEngine {
         errorMessage: appError.message,
       });
     } finally {
+      stopStallTimer();
+      stopOverallTimer();
+      abortController.abort(); // ensure streams are cleaned up
       await removeTempFile(tempPath);
     }
   }
@@ -297,21 +381,35 @@ class MigrationEngine {
     file: FileTransfer,
     sourceProvider: SourceProvider,
     sourceCredentials: unknown,
-    tempPath: string
+    tempPath: string,
+    onProgress?: () => void,
+    signal?: AbortSignal
   ): Promise<void> {
     const handle = await sourceProvider.getReadStream(sourceCredentials, file.sourceFileId);
     const totalBytes = handle.sizeBytes || file.sizeBytes;
 
     const progress = createProgressTransform(totalBytes, ({ bytesTransferred }) => {
+      onProgress?.();
       this.updateFileProgress(jobId, file.id, {
         transferredBytes: scaledProgress(bytesTransferred, totalBytes, "download"),
       });
     });
 
+    // If the abort signal fires while we're downloading, destroy the source
+    // stream so pipeline() rejects instead of hanging forever.
+    const onAbort = () => handle.stream.destroy();
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     try {
       await pipeline(handle.stream, progress, createWriteStream(tempPath));
     } catch (err) {
+      // Only translate provider errors — AbortError from our own
+      // destroy() should propagate as-is so the caller knows it was
+      // cancelled, not a provider failure.
+      if (signal?.aborted) throw err;
       throw translateProviderError(sourceProvider, err);
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -322,7 +420,8 @@ class MigrationEngine {
     destProvider: DestinationProvider,
     destCredentials: unknown,
     tempPath: string,
-    duplicateStrategy: DuplicateStrategy
+    duplicateStrategy: DuplicateStrategy,
+    onProgress?: () => void
   ) {
     return destProvider.uploadFile({
       parentId: file.destParentId,
@@ -333,6 +432,7 @@ class MigrationEngine {
       duplicateStrategy,
       credentials: destCredentials,
       onProgress: ({ bytesUploaded }) => {
+        onProgress?.();
         this.updateFileProgress(jobId, file.id, {
           transferredBytes: scaledProgress(bytesUploaded, file.sizeBytes, "upload"),
         });
