@@ -31,6 +31,16 @@ export async function planMigrationTree(
   destParentId: string,
   pathPrefix = ""
 ): Promise<PlannedFile[]> {
+  // Validate the destination root folder once, on the initial (non-recursive)
+  // call only. Nested subfolders come from resolveDestFolder() which already
+  // creates or looks them up via real API calls, so re-validating would be
+  // redundant. Without this root-level check, an invalid/inaccessible folder
+  // passes through planning silently and every file fails with a 404 during
+  // upload at ~50%.
+  if (pathPrefix === "" && ctx.destProvider.validateDestinationFolder) {
+    await ctx.destProvider.validateDestinationFolder(ctx.destCredentials, destParentId);
+  }
+
   const [subfolders, files] = await Promise.all([
     ctx.sourceProvider.listFolders(ctx.sourceCredentials, sourceFolderId),
     ctx.sourceProvider.listFiles(ctx.sourceCredentials, sourceFolderId),

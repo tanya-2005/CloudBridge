@@ -96,6 +96,16 @@ export interface DestinationProvider {
    */
   uploadFile(params: UploadFileParams): Promise<UploadOutcome>;
 
+  /**
+   * Validates that `folderId` exists and is accessible with the given
+   * credentials. Called once at the start of migration planning so an
+   * invalid/inaccessible destination root folder fails fast with a clear
+   * error instead of silently succeeding through planning and failing
+   * per-file during upload. Optional — providers that cannot validate
+   * ahead of time can omit it and rely on upload-time errors.
+   */
+  validateDestinationFolder?(credentials: unknown, folderId: string): Promise<void>;
+
   /** Same purpose as SourceProvider.translateError — see there for why it's optional. */
   translateError?(err: unknown): AppError;
 }

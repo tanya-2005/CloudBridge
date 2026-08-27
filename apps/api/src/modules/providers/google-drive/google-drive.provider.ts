@@ -177,6 +177,29 @@ export class GoogleDriveProvider implements SourceProvider, DestinationProvider 
     return translateDriveError(err);
   }
 
+  /**
+   * Verifies that `folderId` refers to an actual folder accessible by
+   * the authenticated Google account. This catches the "selected a folder
+   * from the wrong account / a Shared Drive without permission / a deleted
+   * folder" case at planning time instead of letting every file upload
+   * fail with a 404.
+   */
+  async validateDestinationFolder(credentials: unknown, folderId: string): Promise<void> {
+    await runDriveCall(async () => {
+      const drive = resolveClient(credentials);
+      const res = await drive.files.get({
+        fileId: folderId,
+        fields: "id, name, mimeType",
+        supportsAllDrives: true,
+      });
+      if (res.data.mimeType !== FOLDER_MIME_TYPE) {
+        throw new ValidationError(
+          `Destination "${res.data.name ?? folderId}" is not a folder (type: ${res.data.mimeType}). Select a folder, not a file.`
+        );
+      }
+    });
+  }
+
   async createFolder(credentials: unknown, parentId: string, name: string): Promise<RemoteNode> {
     return runDriveCall(async () => {
       const drive = resolveClient(credentials);
